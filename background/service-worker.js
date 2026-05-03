@@ -14,6 +14,7 @@
 //   }
 
 import { rankCandidates, classify, searchQueryFor } from '../lib/ranking.js';
+import { enqueueEvent, flushNow, bufferSize } from '../lib/sync.js';
 
 const RETAILER_HOSTS = {
   walmart: ['walmart.com', 'www.walmart.com'],
@@ -140,22 +141,63 @@ async function navigateAndAdd(tabId, url) {
   return resp.result || { ok: false, reason: 'no result' };
 }
 
-async function runOne(tabId, item) {
-  await tabSend(tabId, { type: 'OPEN_SEARCH', query: searchQueryFor(item) });
+// Map our internal candidate shape to the wire shape the meal planner
+// expects. Stripping _score (computed locally, not interesting to persist).
+function toWireResult(c) {
+  return {
+    url: c.url,
+    walmartItemId: c.walmartItemId || null,
+    title: c.title,
+    brand: c.brand || null,
+    sizeText: c.size || null,
+    price: typeof c.price === 'number' ? c.price : null,
+    imageUrl: c.imageUrl || null,
+    rating: c.rating || null,
+    reviewCount: c.reviewCount || null,
+    availability: c.availability || null,
+    sponsored: !!c.sponsored,
+    position: c.position || null
+  };
+}
+
+async function recordSearchEvent({ retailer, query, candidates, chosen, pickSource, shoppingItemId }) {
+  try {
+    await enqueueEvent({
+      retailer,
+      query,
+      shoppingItemId: shoppingItemId || null,
+      pickSource,                // 'auto' | 'override' | 'failed'
+      pickedUrl: chosen ? chosen.url : null,
+      results: (candidates || []).map(toWireResult),
+      searchedAt: new Date().toISOString()
+    });
+  } catch (e) {
+    // Sync is best-effort. A failed enqueue must not break the run.
+    console.warn('[food-buyer] enqueueEvent failed:', e);
+  }
+}
+
+async function runOne(tabId, item, retailerName) {
+  const query = searchQueryFor(item);
+
+  await tabSend(tabId, { type: 'OPEN_SEARCH', query });
   await waitForTabComplete(tabId);
   await sleep(900);
 
   const blockedResp = await tabSend(tabId, { type: 'CHECK_BLOCKED' });
   if (blockedResp.ok && blockedResp.blocked) {
+    await recordSearchEvent({ retailer: retailerName, query, candidates: [], chosen: null, pickSource: 'failed' });
     return { status: 'fail', reason: 'bot-protection challenge — solve it in the tab and retry' };
   }
 
   const candResp = await tabSend(tabId, { type: 'GET_CANDIDATES' });
   if (!candResp.ok) {
+    await recordSearchEvent({ retailer: retailerName, query, candidates: [], chosen: null, pickSource: 'failed' });
     return { status: 'fail', reason: 'getCandidates: ' + candResp.error };
   }
   const candidatesRaw = (candResp.candidates && candResp.candidates.items) || [];
   if (!candidatesRaw.length) {
+    await recordSearchEvent({ retailer: retailerName, query, candidates: [], chosen: null, pickSource: 'failed' });
     return { status: 'fail', reason: 'no search results' };
   }
 
@@ -164,6 +206,9 @@ async function runOne(tabId, item) {
   const klass = classify(top._score);
 
   if (klass === 'review') {
+    // Don't record a pick yet — user may override. The override path records
+    // its own event with pickSource='override'.
+    await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
     return {
       status: 'review',
       reason: `low-confidence match (${top._score.toFixed(2)}) — pick one`,
@@ -172,6 +217,7 @@ async function runOne(tabId, item) {
     };
   }
   if (klass === 'fail') {
+    await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
     return {
       status: 'fail',
       reason: `no good match (top score ${top._score.toFixed(2)})`,
@@ -182,6 +228,7 @@ async function runOne(tabId, item) {
 
   const addResult = await navigateAndAdd(tabId, top.url);
   if (!addResult.ok) {
+    await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
     return {
       status: 'fail',
       reason: addResult.reason || 'addCurrentToCart failed',
@@ -189,6 +236,7 @@ async function runOne(tabId, item) {
       chosen: top
     };
   }
+  await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: top, pickSource: 'auto' });
   return {
     status: 'ok',
     candidates: ranked.slice(0, 8),
@@ -239,7 +287,7 @@ async function startRun({ tabId, retailerName }) {
         await setRunStatusLine(`Processing: ${item.name}`);
         let outcome;
         try {
-          outcome = await runOne(tabId, item);
+          outcome = await runOne(tabId, item, liveRetailer);
         } catch (e) {
           outcome = { status: 'fail', reason: String(e && e.message || e) };
         }
@@ -249,6 +297,15 @@ async function startRun({ tabId, retailerName }) {
       runState.finishedAt = Date.now();
       runState.statusLine = stopRequested ? 'Stopped.' : 'Done. Review cart manually before checkout.';
       await persistRunState();
+      // Best-effort flush of buffered events to the meal planner. If this
+      // fails (no token, server down) the buffer waits for the next run.
+      try {
+        const r = await flushNow();
+        if (!r.ok && r.skipped !== 'sync not configured') {
+          runState.statusLine += ' (sync: ' + (r.error || 'failed') + ')';
+          await persistRunState();
+        }
+      } catch (_) { /* swallow */ }
     } catch (e) {
       runState.status = 'error';
       runState.finishedAt = Date.now();
@@ -272,6 +329,16 @@ async function applyOverride({ resultIndex, candidateIndex }) {
     ? { ...result, status: 'ok', chosen, reason: undefined }
     : { ...result, status: 'fail', chosen, reason: addResult.reason };
   await setResultAt(resultIndex, updated);
+  // Record the override as its own search event so user_confirmed bumps in
+  // ingredient_products on the meal-planner side. The meal-planner flips
+  // user_confirmed=1 when pickSource is 'override'.
+  await recordSearchEvent({
+    retailer: runState.retailer,
+    query: result.name,
+    candidates: result.candidates,
+    chosen,
+    pickSource: addResult.ok ? 'override' : 'failed'
+  });
   await setRunStatusLine(addResult.ok ? 'Override added.' : 'Override failed: ' + addResult.reason);
   return { ok: true };
 }
@@ -340,6 +407,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             candidateIndex: msg.candidateIndex
           });
           sendResponse(r);
+          break;
+        }
+        case 'SYNC_FLUSH': {
+          const r = await flushNow();
+          sendResponse({ ok: true, result: r });
+          break;
+        }
+        case 'SYNC_STATUS': {
+          const [{ syncSettings }, size, { syncLastResult }] = await Promise.all([
+            chrome.storage.local.get('syncSettings'),
+            bufferSize(),
+            chrome.storage.local.get('syncLastResult')
+          ]);
+          sendResponse({
+            ok: true,
+            configured: !!(syncSettings && syncSettings.baseUrl && syncSettings.token),
+            baseUrl: syncSettings ? syncSettings.baseUrl : null,
+            tokenSet: !!(syncSettings && syncSettings.token),
+            buffered: size,
+            last: syncLastResult || null
+          });
           break;
         }
         default:

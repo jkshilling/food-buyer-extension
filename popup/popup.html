@@ -9,7 +9,13 @@
   <header>
     <h1>Food Buyer</h1>
     <div id="status-line" class="status-line">Loading…</div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="run">Run</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
   </header>
+
+  <div id="tab-run" class="tab-panel active">
 
   <section id="list-section" class="section">
     <div class="row between">
@@ -50,6 +56,33 @@
     <h2>Results</h2>
     <ul id="results-list"></ul>
   </section>
+
+  </div><!-- /#tab-run -->
+
+  <div id="tab-settings" class="tab-panel">
+    <section class="section">
+      <h2>Sync to meal planner</h2>
+      <p class="muted small">
+        Send your search results and picks back to the meal planner so it
+        can track price history and learn which products you prefer per
+        ingredient. Get the token from the meal planner's
+        <strong>Settings → Grocery extension API token</strong> panel.
+      </p>
+      <label class="field">
+        Base URL
+        <input id="sync-base-url" type="url" placeholder="https://meals.alaskatargeting.com" />
+      </label>
+      <label class="field">
+        API token
+        <input id="sync-token" type="password" placeholder="fbe_..." autocomplete="off" />
+      </label>
+      <div class="row">
+        <button id="sync-save-btn" class="primary">Save</button>
+        <button id="sync-flush-btn" class="ghost">Flush now</button>
+      </div>
+      <div id="sync-status" class="muted small"></div>
+    </section>
+  </div><!-- /#tab-settings -->
 
   <footer>
     <p class="muted small">

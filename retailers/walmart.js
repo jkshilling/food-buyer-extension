@@ -19,6 +19,11 @@ const selectors = {
   productPrice: '[data-automation-id="product-price"] span.mr1, [data-automation-id="product-price"] span, div[data-automation-id="product-price"]',
   productLink: 'a[link-identifier], a[href*="/ip/"]',
   productSize: '[data-automation-id="product-price"] + div, span.gray, .f7.gray',
+  productImage: 'img[data-testid="productTileImage"], img[src*="i5.walmartimages.com"], img[loading="lazy"]',
+  productRating: '[data-testid="reviews-rating"], [aria-label*="out of 5"], span[class*="rating"]',
+  productReviewCount: '[data-testid="reviews-count"], a[aria-label*="rating"], span[class*="review-count"]',
+  productSponsored: '[data-automation-id="sponsored-flag"], span:has-text("Sponsored")',
+  productAvailability: '[data-automation-id="fulfillment"], [data-testid="fulfillment-text"]',
 
   addToCartButton: 'button[data-automation-id="atc"], button[aria-label^="Add to cart"]',
   cartConfirm: '[data-testid="cart-preview"], [data-automation-id="cart-preview"]',
@@ -69,6 +74,30 @@ function parsePrice(text) {
   return m ? parseFloat(m[1]) : null;
 }
 
+// Pull the SKU id out of a Walmart product URL. Format is typically
+// /ip/<slug>/<numeric-id>. Falls back to the data-item-id attr on the card.
+function extractItemId(url, card) {
+  const m = url && url.match(/\/ip\/[^/]+\/(\d+)/);
+  if (m) return m[1];
+  return card && card.getAttribute('data-item-id') || null;
+}
+
+function parseRating(card) {
+  const el = $(selectors.productRating, card);
+  if (!el) return null;
+  const aria = el.getAttribute('aria-label') || '';
+  const m = aria.match(/(\d+(?:\.\d+)?)\s*out of/i) || (el.textContent || '').match(/(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+function parseReviewCount(card) {
+  const el = $(selectors.productReviewCount, card);
+  if (!el) return null;
+  const txt = el.textContent || el.getAttribute('aria-label') || '';
+  const m = txt.replace(/,/g, '').match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 async function getCandidates() {
   // Wait for results to render. Walmart hydrates lazily.
   await waitFor(selectors.productCard, { timeoutMs: 12000 });
@@ -81,12 +110,17 @@ async function getCandidates() {
   const cards = $$(selectors.productCard);
   const out = [];
   const seen = new Set();
+  let position = 0;
 
   for (const card of cards) {
+    position++;
     const titleEl = $(selectors.productTitle, card);
     const priceEl = $(selectors.productPrice, card);
     const linkEl = $(selectors.productLink, card);
     const sizeEl = $(selectors.productSize, card);
+    const imgEl = $(selectors.productImage, card);
+    const sponsoredEl = $(selectors.productSponsored, card);
+    const availabilityEl = $(selectors.productAvailability, card);
 
     const title = titleEl ? titleEl.textContent.trim() : '';
     const href = linkEl ? linkEl.getAttribute('href') : '';
@@ -102,7 +136,17 @@ async function getCandidates() {
       title,
       price: parsePrice(priceEl ? priceEl.textContent : ''),
       size: sizeEl ? sizeEl.textContent.trim() : '',
-      url
+      url,
+      // Richer fields persisted to the meal-planner via /api/grocery-events.
+      // None of these are critical for ranking; they exist for analytics and
+      // future use (cart cost preview, substitution memory, etc.).
+      walmartItemId: extractItemId(url, card),
+      imageUrl: imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || null) : null,
+      rating: parseRating(card),
+      reviewCount: parseReviewCount(card),
+      sponsored: !!sponsoredEl,
+      availability: availabilityEl ? availabilityEl.textContent.trim().slice(0, 100) : null,
+      position
     });
     if (out.length >= 10) break;
   }

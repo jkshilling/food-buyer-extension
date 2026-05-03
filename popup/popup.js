@@ -257,6 +257,78 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// ---------- settings tab ----------
+
+function activateTab(name) {
+  document.querySelectorAll('.tab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.tab === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach((p) => {
+    p.classList.toggle('active', p.id === 'tab-' + name);
+  });
+  if (name === 'settings') refreshSyncStatus();
+}
+
+document.querySelectorAll('.tab').forEach((b) => {
+  b.addEventListener('click', () => activateTab(b.dataset.tab));
+});
+
+const syncEls = {
+  baseUrl: document.querySelector('#sync-base-url'),
+  token: document.querySelector('#sync-token'),
+  saveBtn: document.querySelector('#sync-save-btn'),
+  flushBtn: document.querySelector('#sync-flush-btn'),
+  status: document.querySelector('#sync-status')
+};
+
+async function refreshSyncStatus() {
+  const { syncSettings } = await chrome.storage.local.get('syncSettings');
+  if (syncSettings) {
+    syncEls.baseUrl.value = syncSettings.baseUrl || '';
+    // Don't echo the token back — just indicate one is set.
+    syncEls.token.placeholder = syncSettings.token ? '••• (set — paste a new one to replace)' : 'fbe_...';
+    syncEls.token.value = '';
+  }
+  const r = await send({ type: 'SYNC_STATUS' });
+  if (!r.ok) { syncEls.status.textContent = 'status check failed'; return; }
+  const lines = [];
+  lines.push(r.configured ? 'Configured.' : 'Not configured.');
+  if (r.buffered) lines.push(r.buffered + ' event(s) waiting to send.');
+  if (r.last) {
+    const ago = Math.round((Date.now() - r.last.at) / 1000);
+    if (r.last.ok) {
+      lines.push(`Last flush ${ago}s ago: sent ${r.last.sent}` + (r.last.ingested ? ` (ingested ${r.last.ingested.searches} searches)` : ''));
+    } else {
+      lines.push(`Last flush ${ago}s ago: ${r.last.error || 'failed'}`);
+    }
+  }
+  syncEls.status.textContent = lines.join(' ');
+}
+
+syncEls.saveBtn.addEventListener('click', async () => {
+  const baseUrl = syncEls.baseUrl.value.trim();
+  // Only update token if user typed one — keep existing otherwise.
+  const typed = syncEls.token.value.trim();
+  const { syncSettings: existing } = await chrome.storage.local.get('syncSettings');
+  const token = typed || (existing && existing.token) || '';
+  if (!baseUrl || !token) {
+    syncEls.status.textContent = 'Need both a base URL and a token.';
+    return;
+  }
+  await chrome.storage.local.set({ syncSettings: { baseUrl: baseUrl.replace(/\/+$/, ''), token } });
+  syncEls.status.textContent = 'Saved.';
+  syncEls.token.value = '';
+  refreshSyncStatus();
+});
+
+syncEls.flushBtn.addEventListener('click', async () => {
+  syncEls.flushBtn.disabled = true;
+  syncEls.status.textContent = 'Flushing…';
+  const r = await send({ type: 'SYNC_FLUSH' });
+  syncEls.flushBtn.disabled = false;
+  refreshSyncStatus();
+});
+
 (function init() {
   setStatus('Ready.');
   // Paint the empty shell synchronously, then upgrade as data lands.
