@@ -276,6 +276,7 @@ document.querySelectorAll('.tab').forEach((b) => {
 const syncEls = {
   baseUrl: document.querySelector('#sync-base-url'),
   token: document.querySelector('#sync-token'),
+  tokenState: document.querySelector('#sync-token-state'),
   saveBtn: document.querySelector('#sync-save-btn'),
   flushBtn: document.querySelector('#sync-flush-btn'),
   status: document.querySelector('#sync-status')
@@ -285,9 +286,18 @@ async function refreshSyncStatus() {
   const { syncSettings } = await chrome.storage.local.get('syncSettings');
   if (syncSettings) {
     syncEls.baseUrl.value = syncSettings.baseUrl || '';
-    // Don't echo the token back — just indicate one is set.
-    syncEls.token.placeholder = syncSettings.token ? '••• (set — paste a new one to replace)' : 'fbe_...';
     syncEls.token.value = '';
+  }
+  // Make the saved-vs-empty distinction explicit on a separate line so it's
+  // visible even when the input is blank.
+  const hasToken = !!(syncSettings && syncSettings.token);
+  if (hasToken) {
+    const masked = syncSettings.token.slice(0, 4) + '…' + syncSettings.token.slice(-4);
+    syncEls.tokenState.textContent = `✓ Token saved (${masked}). Leave blank to keep, or paste a new one to replace.`;
+    syncEls.tokenState.style.color = '#1f7a3a';
+  } else {
+    syncEls.tokenState.textContent = 'No token set yet.';
+    syncEls.tokenState.style.color = '#b3261e';
   }
   const r = await send({ type: 'SYNC_STATUS' });
   if (!r.ok) { syncEls.status.textContent = 'status check failed'; return; }
