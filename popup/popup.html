@@ -92,8 +92,11 @@
         <button id="sync-peek-btn" class="link-btn" title="See the events that would be sent (or dropped)">View unsent</button>
         <span class="muted">·</span>
         <button id="sync-clear-btn" class="link-btn" title="Drop unsent events from past runs (does not affect run results shown on the Run tab, or anything already synced to the server)">Clear unsent</button>
+        <span id="sync-rejected-sep" class="muted hidden">·</span>
+        <button id="sync-rejected-btn" class="link-btn hidden" title="See per-event reasons the meal planner refused to ingest from the most recent flush">View errors</button>
       </div>
       <ul id="sync-buffer-list" class="hidden"></ul>
+      <ul id="sync-rejected-list" class="hidden"></ul>
     </section>
   </div><!-- /#tab-settings -->
 

@@ -428,7 +428,10 @@ const syncEls = {
   flushBtn: document.querySelector('#sync-flush-btn'),
   peekBtn: document.querySelector('#sync-peek-btn'),
   clearBtn: document.querySelector('#sync-clear-btn'),
-  bufferList: document.querySelector('#sync-buffer-list')
+  rejectedSep: document.querySelector('#sync-rejected-sep'),
+  rejectedBtn: document.querySelector('#sync-rejected-btn'),
+  bufferList: document.querySelector('#sync-buffer-list'),
+  rejectedList: document.querySelector('#sync-rejected-list')
 };
 
 // Render N seconds as a human-friendly age. "12s ago", "34m ago", "7h ago",
@@ -514,6 +517,20 @@ async function refreshSyncStatus() {
   if (r.buffered) parts.push(r.buffered + ' queued');
   pill.textContent = parts.join(' · ');
   if (!pill.classList.contains('warn')) pill.classList.add('ok');
+
+  // Toggle the "View errors" link button based on whether there's a
+  // rejection log to look at. Hidden by default to keep the tools row
+  // uncluttered when everything's fine.
+  const { syncLastRejected } = await chrome.storage.local.get('syncLastRejected');
+  const hasRejected = Array.isArray(syncLastRejected) && syncLastRejected.length > 0;
+  syncEls.rejectedBtn.classList.toggle('hidden', !hasRejected);
+  syncEls.rejectedSep.classList.toggle('hidden', !hasRejected);
+  if (!hasRejected) {
+    syncEls.rejectedList.classList.add('hidden');
+    syncEls.rejectedBtn.textContent = 'View errors';
+  } else {
+    syncEls.rejectedBtn.textContent = `View errors (${syncLastRejected.length})`;
+  }
 }
 
 function setSyncPill(text, kind) {
@@ -590,6 +607,59 @@ syncEls.clearBtn.addEventListener('click', async () => {
   syncEls.clearBtn.disabled = false;
   syncEls.bufferList.classList.add('hidden');
   refreshSyncStatus();
+});
+
+syncEls.rejectedBtn.addEventListener('click', async () => {
+  // Toggle: clicking again hides the list.
+  if (!syncEls.rejectedList.classList.contains('hidden')) {
+    syncEls.rejectedList.classList.add('hidden');
+    return;
+  }
+  const r = await send({ type: 'SYNC_REJECTED_PEEK' });
+  const rows = (r && r.rejected) || [];
+  syncEls.rejectedList.innerHTML = '';
+  if (!rows.length) {
+    const li = document.createElement('li');
+    li.className = 'meta';
+    li.textContent = 'No errors recorded.';
+    syncEls.rejectedList.appendChild(li);
+  } else {
+    rows.forEach((rej) => {
+      const li = document.createElement('li');
+      const q = document.createElement('div');
+      q.className = 'bq';
+      const ev = rej.event || {};
+      q.textContent = `${ev.retailer || '?'} — "${ev.query || '(unknown query)'}"`;
+      const errLine = document.createElement('div');
+      errLine.className = 'err';
+      errLine.textContent = rej.error;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const bits = [];
+      if (ev.pickSource) bits.push(ev.pickSource);
+      if (Array.isArray(ev.results)) bits.push(`${ev.results.length} candidates`);
+      if (rej.at) bits.push(new Date(rej.at).toLocaleTimeString());
+      meta.textContent = bits.join(' · ');
+      li.appendChild(q);
+      li.appendChild(errLine);
+      if (bits.length) li.appendChild(meta);
+      syncEls.rejectedList.appendChild(li);
+    });
+    // Footer with a clear-link.
+    const footer = document.createElement('li');
+    footer.style.textAlign = 'right';
+    const clearLink = document.createElement('button');
+    clearLink.className = 'link-btn';
+    clearLink.textContent = 'Dismiss errors';
+    clearLink.addEventListener('click', async () => {
+      await send({ type: 'SYNC_REJECTED_CLEAR' });
+      syncEls.rejectedList.classList.add('hidden');
+      refreshSyncStatus();
+    });
+    footer.appendChild(clearLink);
+    syncEls.rejectedList.appendChild(footer);
+  }
+  syncEls.rejectedList.classList.remove('hidden');
 });
 
 syncEls.peekBtn.addEventListener('click', async () => {

@@ -548,6 +548,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
         }
+        case 'SYNC_REJECTED_PEEK': {
+          // Returns the per-event rejection log from the most recent flush.
+          // Each entry has { error, event: { retailer, query, pickSource, ... }, at }
+          // so the popup can show the user what was rejected and why.
+          const { syncLastRejected } = await chrome.storage.local.get('syncLastRejected');
+          sendResponse({ ok: true, rejected: Array.isArray(syncLastRejected) ? syncLastRejected : [] });
+          break;
+        }
+        case 'SYNC_REJECTED_CLEAR': {
+          await chrome.storage.local.remove('syncLastRejected');
+          sendResponse({ ok: true });
+          break;
+        }
         case 'SYNC_BUFFER_PEEK': {
           // Return a summary of each buffered event so the user can see what
           // would be dropped before clicking Clear unsent. Just the fields
