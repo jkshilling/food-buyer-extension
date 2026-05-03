@@ -101,6 +101,37 @@ function tabSend(tabId, message) {
   });
 }
 
+// Reloading the extension on chrome://extensions orphans content scripts in
+// already-open tabs — Chrome does NOT retroactively re-inject from
+// manifest.content_scripts. The first message after a reload then comes back
+// as "Could not establish connection. Receiving end does not exist."
+//
+// This helper pings the retailer script; if there's no listener, it
+// programmatically injects the script and waits a beat for it to register.
+// Idempotent: if the script is already responding, returns immediately.
+async function ensureRetailerScript(tabId) {
+  const ping = await tabSend(tabId, { type: 'PING_RETAILER' });
+  if (ping.ok) return { ok: true, injected: false };
+  const noListener = ping.error && /Receiving end does not exist|Could not establish connection/i.test(ping.error);
+  if (!noListener) return ping;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content-scripts/retailer.js']
+    });
+  } catch (e) {
+    return { ok: false, error: 'injectScript: ' + (e && e.message || e) };
+  }
+  // Script needs a moment to dynamic-import the registry + register its
+  // message listener. Poll-ping briefly instead of a fixed sleep.
+  for (let i = 0; i < 12; i++) {
+    await sleep(150);
+    const r = await tabSend(tabId, { type: 'PING_RETAILER' });
+    if (r.ok) return { ok: true, injected: true };
+  }
+  return { ok: false, error: 'retailer script did not register after injection' };
+}
+
 function waitForTabComplete(tabId, timeoutMs = 30000) {
   return new Promise((resolve) => {
     let done = false;
@@ -132,6 +163,8 @@ async function navigateAndAdd(tabId, url) {
   await chrome.tabs.update(tabId, { url });
   await waitForTabComplete(tabId);
   await sleep(900);
+  const ready = await ensureRetailerScript(tabId);
+  if (!ready.ok) return { ok: false, reason: 'content script not ready: ' + ready.error };
   const blockedResp = await tabSend(tabId, { type: 'CHECK_BLOCKED' });
   if (blockedResp.ok && blockedResp.blocked) {
     return { ok: false, reason: 'bot-protection challenge on product page' };
@@ -183,6 +216,13 @@ async function runOne(tabId, item, retailerName) {
   await tabSend(tabId, { type: 'OPEN_SEARCH', query });
   await waitForTabComplete(tabId);
   await sleep(900);
+
+  // Page reloaded — content script needs to be there to answer.
+  const ready = await ensureRetailerScript(tabId);
+  if (!ready.ok) {
+    await recordSearchEvent({ retailer: retailerName, query, candidates: [], chosen: null, pickSource: 'failed' });
+    return { status: 'fail', reason: 'content script not ready: ' + ready.error };
+  }
 
   const blockedResp = await tabSend(tabId, { type: 'CHECK_BLOCKED' });
   if (blockedResp.ok && blockedResp.blocked) {
@@ -271,10 +311,22 @@ async function startRun({ tabId, retailerName }) {
     currentIndex: 0,
     total: shoppingList.items.length,
     currentItem: null,
-    statusLine: 'Starting…',
+    statusLine: 'Preparing retailer tab…',
     results: shoppingList.items.map((it) => ({ name: it.name, status: 'pending' }))
   };
   await persistRunState();
+
+  // Make sure the retailer content script is alive in this tab. Catches the
+  // common case of "user reloaded the extension but didn't reload the
+  // walmart.com tab," which orphans the content script.
+  const ready = await ensureRetailerScript(tabId);
+  if (!ready.ok) {
+    runState.status = 'error';
+    runState.statusLine = 'Retailer tab not ready: ' + ready.error;
+    runState.finishedAt = Date.now();
+    await persistRunState();
+    return { ok: false, error: ready.error };
+  }
 
   // Fire-and-forget the loop. Caller doesn't wait.
   (async () => {
@@ -324,6 +376,11 @@ async function applyOverride({ resultIndex, candidateIndex }) {
   const chosen = result.candidates[candidateIndex];
   if (!chosen) return { ok: false, error: 'no such candidate' };
   await setRunStatusLine(`Adding override: ${chosen.title}`);
+  // Same orphan-after-extension-reload risk as startRun.
+  const ready = await ensureRetailerScript(runState.tabId);
+  if (!ready.ok) {
+    return { ok: false, error: ready.error };
+  }
   const addResult = await navigateAndAdd(runState.tabId, chosen.url);
   const updated = addResult.ok
     ? { ...result, status: 'ok', chosen, reason: undefined }
