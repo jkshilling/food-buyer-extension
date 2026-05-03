@@ -314,30 +314,54 @@ async function addCandidateByUrl(productUrl) {
   if (isBlocked()) return { ok: false, reason: 'bot-protection-challenge' };
   if (!productUrl) return { ok: false, reason: 'no-url' };
 
-  const targetKey = productUrl.split('?')[0];
+  // Strip query AND hash so URLs from getCandidates match URLs read fresh
+  // off the live page even if Walmart re-decorated them with tracking
+  // params.
+  const normalize = (u) => String(u || '').split('?')[0].split('#')[0];
+  const targetKey = normalize(productUrl);
+
+  // Walmart sometimes deduplicates the URL slug ("/ip/My-Item/12345" vs
+  // "/ip/My-Item/12345?from=search") and sometimes only the SKU id at the
+  // tail is stable. We compare on full path AND on tail-id as a backup.
+  const targetTail = (targetKey.match(/\/(\d+)$/) || [])[1] || null;
+
+  const matchCard = (card) => {
+    const linkEl = $(selectors.productLink, card);
+    const href = linkEl ? linkEl.getAttribute('href') : '';
+    if (!href) return false;
+    const cardUrl = normalize(href.startsWith('http') ? href : 'https://www.walmart.com' + href);
+    if (cardUrl === targetKey) return true;
+    if (targetTail) {
+      const cardTail = (cardUrl.match(/\/(\d+)$/) || [])[1];
+      if (cardTail && cardTail === targetTail) return true;
+    }
+    return false;
+  };
+
   const cards = $$(selectors.productCard);
   let matched = null;
   for (const card of cards) {
-    const linkEl = $(selectors.productLink, card);
-    const href = linkEl ? linkEl.getAttribute('href') : '';
-    if (!href) continue;
-    const cardUrl = href.startsWith('http') ? href : 'https://www.walmart.com' + href;
-    if (cardUrl.split('?')[0] === targetKey) {
-      matched = card;
-      break;
-    }
+    if (matchCard(card)) { matched = card; break; }
   }
   if (!matched) return { ok: false, reason: 'card-not-found' };
 
-  const btn = matched.querySelector(selectors.cardAddToCartButton);
+  // Lazy hydration: scroll the card into view first so Walmart actually
+  // renders the +Add button. Then poll briefly for it to appear.
+  try {
+    matched.scrollIntoView({ block: 'center', behavior: 'instant' });
+  } catch (_) {}
+
+  let btn = null;
+  for (let i = 0; i < 14; i++) {
+    btn = matched.querySelector(selectors.cardAddToCartButton);
+    if (btn) break;
+    await sleep(150);
+  }
   if (!btn) {
-    // Probably a "Choose options" SKU (multipack, variants). Caller falls
-    // back to navigateAndAdd.
+    // Either a "Choose options" SKU (variants) or hydration failed in the
+    // 2.1s polling window. Caller falls back to navigateAndAdd either way.
     return { ok: false, reason: 'needs-options' };
   }
-  try {
-    btn.scrollIntoView({ block: 'center', behavior: 'instant' });
-  } catch (_) {}
   try {
     btn.click();
   } catch (e) {

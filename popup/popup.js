@@ -137,9 +137,13 @@ function renderRun() {
     if (r.chosen) {
       parts.push(`→ ${r.chosen.title}` + (r.chosen.price != null ? ` ($${r.chosen.price.toFixed(2)})` : ''));
     }
-    // Always surface the reason for fail/review — the chosen line alone hid
-    // it before, so users saw a red FAIL with no explanation.
-    if (r.reason && r.status !== 'ok') parts.push(r.reason);
+    // For non-ok rows, always show the reason. For ok rows, only show it
+    // when it indicates the slower fallback path (so the user knows when a
+    // SKU forced a product-page visit instead of using fast +Add).
+    if (r.reason) {
+      const isFallbackInfo = r.status === 'ok' && /fell back|product page/i.test(r.reason);
+      if (r.status !== 'ok' || isFallbackInfo) parts.push(r.reason);
+    }
     meta.textContent = parts.join(' — ');
     li.appendChild(meta);
 
