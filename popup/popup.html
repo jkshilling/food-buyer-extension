@@ -66,7 +66,7 @@
   <div id="tab-settings" class="tab-panel">
     <section class="section">
       <h2>Sync to meal planner</h2>
-      <p class="muted small">
+      <p id="sync-help" class="muted small hidden">
         Send your search results and picks back to the meal planner so it
         can track price history and learn which products you prefer per
         ingredient. Get the token from the meal planner's
@@ -81,13 +81,17 @@
         <input id="sync-token" type="password" placeholder="fbe_..." autocomplete="off" />
         <span id="sync-token-state" class="muted small"></span>
       </label>
+      <div id="sync-status-pill" class="status-pill"></div>
       <div class="row">
-        <button id="sync-save-btn" class="primary">Save</button>
-        <button id="sync-flush-btn" class="ghost">Flush now</button>
-        <button id="sync-peek-btn" class="ghost" title="See the events that would be sent (or dropped)">View unsent</button>
-        <button id="sync-clear-btn" class="ghost" title="Drop unsent events from past runs (does not affect run results shown on the Run tab, or anything already synced to the server)">Clear unsent</button>
+        <button id="sync-save-btn" class="primary" style="flex:1">Save</button>
       </div>
-      <div id="sync-status" class="muted small"></div>
+      <div class="row sync-tools">
+        <button id="sync-flush-btn" class="link-btn">Flush now</button>
+        <span class="muted">·</span>
+        <button id="sync-peek-btn" class="link-btn" title="See the events that would be sent (or dropped)">View unsent</button>
+        <span class="muted">·</span>
+        <button id="sync-clear-btn" class="link-btn" title="Drop unsent events from past runs (does not affect run results shown on the Run tab, or anything already synced to the server)">Clear unsent</button>
+      </div>
       <ul id="sync-buffer-list" class="hidden"></ul>
     </section>
   </div><!-- /#tab-settings -->

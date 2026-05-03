@@ -86,6 +86,42 @@ h2 {
   word-break: break-word;
 }
 
+/* Operationally-important sync status. Sits above Save so it can't be
+   missed. Color encodes outcome: green = ok, red = failure, gray = neutral
+   (not configured / no recent activity). */
+.status-pill {
+  margin: 10px 0 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #f4f4f4;
+  color: #555;
+  border-left: 3px solid #ccc;
+}
+.status-pill.ok    { background: #e8f3ec; color: #1f5a2c; border-left-color: #1f7a3a; }
+.status-pill.warn  { background: #fdf5e2; color: #6e5400; border-left-color: #c69400; }
+.status-pill.fail  { background: #fae8e6; color: #7a1a13; border-left-color: #b3261e; }
+
+/* Tools row (Flush / View / Clear) — secondary text-style buttons,
+   visually subordinate to the primary Save button above. */
+.sync-tools {
+  margin-top: 6px;
+  font-size: 11px;
+  align-items: center;
+  gap: 6px;
+}
+.link-btn {
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  color: #1f5a8a;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link-btn:hover { color: #0f3a64; }
+.link-btn:disabled { color: #888; text-decoration: none; cursor: not-allowed; }
+
 #sync-buffer-list {
   list-style: none;
   margin: 8px 0 0;

@@ -407,6 +407,9 @@ function activateTab(name) {
   document.querySelectorAll('.tab-panel').forEach((p) => {
     p.classList.toggle('active', p.id === 'tab-' + name);
   });
+  // The top "Ready." / run-status line is about run state — irrelevant on
+  // the Settings tab. Hide it there.
+  els.status.classList.toggle('hidden', name === 'settings');
   if (name === 'settings') refreshSyncStatus();
 }
 
@@ -415,16 +418,27 @@ document.querySelectorAll('.tab').forEach((b) => {
 });
 
 const syncEls = {
+  help: document.querySelector('#sync-help'),
   baseUrl: document.querySelector('#sync-base-url'),
   token: document.querySelector('#sync-token'),
   tokenState: document.querySelector('#sync-token-state'),
+  statusPill: document.querySelector('#sync-status-pill'),
   saveBtn: document.querySelector('#sync-save-btn'),
   flushBtn: document.querySelector('#sync-flush-btn'),
   peekBtn: document.querySelector('#sync-peek-btn'),
   clearBtn: document.querySelector('#sync-clear-btn'),
-  status: document.querySelector('#sync-status'),
   bufferList: document.querySelector('#sync-buffer-list')
 };
+
+// Render N seconds as a human-friendly age. "12s ago", "34m ago", "7h ago",
+// "3d ago". Used for the sync-status pill so the user doesn't have to do
+// "27280 seconds is how many hours" math in their head.
+function formatAge(seconds) {
+  if (seconds < 60) return Math.max(0, Math.round(seconds)) + 's ago';
+  if (seconds < 3600) return Math.round(seconds / 60) + 'm ago';
+  if (seconds < 86400) return Math.round(seconds / 3600) + 'h ago';
+  return Math.round(seconds / 86400) + 'd ago';
+}
 
 // The meal planner is a single deployment for this user; no other base URL
 // is realistic. Default the field to it so first-time setup is just "paste
@@ -448,31 +462,73 @@ async function refreshSyncStatus() {
     syncEls.tokenState.textContent = 'No token set yet.';
     syncEls.tokenState.style.color = '#b3261e';
   }
+
+  // Help paragraph only appears when there's no token saved — once configured
+  // it's noise. Useful for first-time setup, useless after.
+  syncEls.help.classList.toggle('hidden', hasToken);
+
+  // Status pill above Save: the operationally important line. Color encodes
+  // outcome; copy is short. "sent N (ingested N)" was redundant when both
+  // numbers matched (the normal case); now we only call out a discrepancy
+  // (server rejected some events) or a failure.
   const r = await send({ type: 'SYNC_STATUS' });
-  if (!r.ok) { syncEls.status.textContent = 'status check failed'; return; }
-  const lines = [];
-  lines.push(r.configured ? 'Configured.' : 'Not configured.');
-  if (r.buffered) lines.push(r.buffered + ' event(s) waiting to send.');
-  if (r.last) {
-    const ago = Math.round((Date.now() - r.last.at) / 1000);
-    if (r.last.ok) {
-      lines.push(`Last flush ${ago}s ago: sent ${r.last.sent}` + (r.last.ingested ? ` (ingested ${r.last.ingested.searches} searches)` : ''));
-    } else {
-      lines.push(`Last flush ${ago}s ago: ${r.last.error || 'failed'}`);
-    }
+  const pill = syncEls.statusPill;
+  pill.classList.remove('ok', 'warn', 'fail');
+  if (!r.ok) {
+    pill.textContent = 'Status check failed.';
+    pill.classList.add('fail');
+    return;
   }
-  syncEls.status.textContent = lines.join(' ');
+  if (!r.configured) {
+    pill.textContent = 'Not configured. Paste a token below.';
+    pill.classList.add('warn');
+    return;
+  }
+
+  const parts = ['✓ Configured'];
+  if (r.last) {
+    const ageSec = (Date.now() - r.last.at) / 1000;
+    if (r.last.ok) {
+      const sent = r.last.sent || 0;
+      const ingested = r.last && r.last.ingested ? r.last.ingested.searches : sent;
+      if (sent === 0) {
+        // Successful flush with nothing to send — just confirm we're connected.
+        parts.push('synced ' + formatAge(ageSec));
+      } else if (ingested === sent) {
+        parts.push(`synced ${sent} event${sent === 1 ? '' : 's'} ${formatAge(ageSec)}`);
+      } else {
+        // Discrepancy — surface it so the user knows the meal planner rejected some.
+        parts.push(`synced ${sent} event${sent === 1 ? '' : 's'}, ${sent - ingested} rejected, ${formatAge(ageSec)}`);
+        pill.classList.add('warn');
+      }
+    } else {
+      // Last flush failed.
+      pill.textContent = `✗ Sync failed ${formatAge(ageSec)}: ${r.last.error || 'unknown'}`;
+      pill.classList.add('fail');
+      return;
+    }
+  } else {
+    parts.push('no syncs yet');
+  }
+  if (r.buffered) parts.push(r.buffered + ' queued');
+  pill.textContent = parts.join(' · ');
+  if (!pill.classList.contains('warn')) pill.classList.add('ok');
+}
+
+function setSyncPill(text, kind) {
+  syncEls.statusPill.classList.remove('ok', 'warn', 'fail');
+  if (kind) syncEls.statusPill.classList.add(kind);
+  syncEls.statusPill.textContent = text;
 }
 
 syncEls.saveBtn.addEventListener('click', async () => {
   const baseUrl = syncEls.baseUrl.value.trim();
   const token = syncEls.token.value.trim();
   if (!baseUrl || !token) {
-    syncEls.status.textContent = 'Need both a base URL and a token.';
+    setSyncPill('Need both a base URL and a token.', 'fail');
     return;
   }
   await chrome.storage.local.set({ syncSettings: { baseUrl: baseUrl.replace(/\/+$/, ''), token } });
-  syncEls.status.textContent = 'Saved.';
   // Don't clear the token field — keep what was just saved visible (rendered
   // as dots since the input is type="password") so the user knows it
   // persists and can be edited without re-pasting.
@@ -481,8 +537,8 @@ syncEls.saveBtn.addEventListener('click', async () => {
 
 syncEls.flushBtn.addEventListener('click', async () => {
   syncEls.flushBtn.disabled = true;
-  syncEls.status.textContent = 'Flushing…';
-  const r = await send({ type: 'SYNC_FLUSH' });
+  setSyncPill('Flushing…');
+  await send({ type: 'SYNC_FLUSH' });
   syncEls.flushBtn.disabled = false;
   refreshSyncStatus();
 });
