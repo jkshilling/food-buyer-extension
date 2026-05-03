@@ -398,20 +398,44 @@ async function addOverride(resultIdx, candidateIdx) {
 }
 
 // ---------- init ----------
+//
+// Both refresh functions deliberately bypass the service worker. MV3 service
+// workers idle out after ~30s; a cold wake adds 100-300ms before the popup
+// can render anything. chrome.storage.local and chrome.tabs.query are
+// available directly to the popup without waking the worker, so init paints
+// instantly even on the first click after a long idle.
+
+const RETAILER_HOSTS = {
+  walmart: ['walmart.com', 'www.walmart.com'],
+  target: ['target.com', 'www.target.com'],
+  kroger: ['kroger.com', 'www.kroger.com']
+};
+
+function hostnameToRetailer(hostname) {
+  if (!hostname) return null;
+  for (const [name, hosts] of Object.entries(RETAILER_HOSTS)) {
+    if (hosts.includes(hostname)) return name;
+  }
+  return null;
+}
 
 async function refreshList() {
-  const r = await send('GET_SHOPPING_LIST');
-  state.list = (r.ok && r.shoppingList) || null;
+  const { shoppingList } = await chrome.storage.local.get('shoppingList');
+  state.list = shoppingList || null;
   renderList();
 }
 
 async function refreshRetailer() {
-  const r = await send('GET_ACTIVE_RETAILER');
-  if (r.ok && r.retailer && r.tabId) {
-    state.retailer = { name: r.retailer, tabId: r.tabId };
-  } else {
-    state.retailer = null;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  let retailer = null;
+  let tabId = null;
+  if (tab && tab.url) {
+    try {
+      retailer = hostnameToRetailer(new URL(tab.url).hostname);
+      tabId = tab.id;
+    } catch (_) {}
   }
+  state.retailer = retailer && tabId ? { name: retailer, tabId } : null;
   renderRetailer();
 }
 
@@ -449,7 +473,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-(async function init() {
+(function init() {
   setStatus('Ready.');
-  await Promise.all([refreshList(), refreshRetailer()]);
+  // Paint the empty shell immediately, then upgrade as data lands.
+  renderList();
+  renderRetailer();
+  refreshList();
+  refreshRetailer();
 })();
