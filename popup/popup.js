@@ -8,12 +8,15 @@
 // RUN_OVERRIDE messages to the service worker; everything else is plain
 // reads.
 
+import { fetchEstimate } from '../lib/estimate.js';
+
 const $ = (sel) => document.querySelector(sel);
 
 const els = {
   status: $('#status-line'),
   itemCount: $('#item-count'),
   sourceLine: $('#source-line'),
+  estimateLine: $('#estimate-line'),
   refreshBtn: $('#refresh-btn'),
   retailerName: $('#retailer-name'),
   retailerHint: $('#retailer-hint'),
@@ -31,8 +34,13 @@ const els = {
 const state = {
   list: null,
   retailer: null,    // { name, tabId }
-  run: null          // persisted runState shape from service worker
+  run: null,         // persisted runState shape from service worker
+  estimate: null     // { summary, estimates } from /api/grocery/price-estimate
 };
+
+// Debounce token for the estimate fetch — popup can re-render fast and we
+// don't want to hammer the meal planner.
+let _estimateInflight = null;
 
 const RETAILER_HOSTS = {
   walmart: ['walmart.com', 'www.walmart.com'],
@@ -77,8 +85,87 @@ function renderList() {
   } else {
     els.sourceLine.textContent = 'No list yet — visit your meal-planner shopping page.';
   }
+  renderEstimate();
   els.runBtn.disabled = !(count > 0 && state.retailer && !isRunning());
   els.stopBtn.disabled = !isRunning();
+}
+
+function renderEstimate() {
+  const e = state.estimate;
+  if (!e || !e.summary || e.summary.totalCount === 0) {
+    els.estimateLine.classList.add('hidden');
+    els.estimateLine.textContent = '';
+    els.estimateLine.classList.remove('over-budget');
+    return;
+  }
+  const s = e.summary;
+  els.estimateLine.classList.remove('hidden');
+
+  const amount = `~$${s.total.toFixed(2)}`;
+  const detailBits = [];
+  if (s.pricedCount < s.totalCount) {
+    detailBits.push(`${s.pricedCount}/${s.totalCount} priced`);
+  } else {
+    detailBits.push('based on last seen prices');
+  }
+  if (s.weeklyBudget != null) {
+    const over = s.total > s.weeklyBudget;
+    if (over) {
+      detailBits.push(`over $${s.weeklyBudget.toFixed(0)} budget`);
+      els.estimateLine.classList.add('over-budget');
+    } else {
+      detailBits.push(`of $${s.weeklyBudget.toFixed(0)} budget`);
+      els.estimateLine.classList.remove('over-budget');
+    }
+  } else {
+    els.estimateLine.classList.remove('over-budget');
+  }
+
+  els.estimateLine.innerHTML = '';
+  const left = document.createElement('span');
+  const amountSpan = document.createElement('span');
+  amountSpan.className = 'est-amount';
+  amountSpan.textContent = amount;
+  left.appendChild(document.createTextNode('Estimated cart total: '));
+  left.appendChild(amountSpan);
+
+  const right = document.createElement('span');
+  right.className = 'est-detail';
+  right.textContent = detailBits.join(' · ');
+
+  els.estimateLine.appendChild(left);
+  els.estimateLine.appendChild(right);
+}
+
+async function refreshEstimate() {
+  if (!state.list || !state.list.items || state.list.items.length === 0) {
+    state.estimate = null;
+    renderEstimate();
+    return;
+  }
+  // Use the popup's stored sync settings — same path the SW uses for sync.
+  const { syncSettings } = await chrome.storage.local.get('syncSettings');
+  if (!syncSettings || !syncSettings.baseUrl || !syncSettings.token) {
+    state.estimate = null;
+    renderEstimate();
+    return;
+  }
+  // De-dupe in-flight requests keyed on the list contents so an init storm
+  // doesn't fire multiple parallel fetches.
+  const key = JSON.stringify(state.list.items.map((it) => it.name));
+  if (_estimateInflight === key) return;
+  _estimateInflight = key;
+  try {
+    const r = await fetchEstimate(syncSettings, state.list.items);
+    if (r && r.ok) {
+      state.estimate = r;
+    } else {
+      state.estimate = null;
+    }
+    renderEstimate();
+  } finally {
+    _estimateInflight = null;
+  }
 }
 
 function renderRetailer() {
@@ -184,6 +271,9 @@ async function refreshList() {
   const { shoppingList } = await chrome.storage.local.get('shoppingList');
   state.list = shoppingList || null;
   renderList();
+  // Estimate is independent of the soft re-extract below — fire it now from
+  // the data we already have so the line shows up fast.
+  refreshEstimate();
 
   // Best-effort: ping any open meal-planner shopping tab to re-extract NOW
   // (no tab reload). The content script's own auto-update covers edits made
@@ -294,11 +384,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.shoppingList) {
     state.list = changes.shoppingList.newValue || null;
     renderList();
+    refreshEstimate();
   }
   if (changes.runState) {
     state.run = changes.runState.newValue || null;
     renderRun();
     renderList();
+  }
+  if (changes.syncSettings) {
+    // Token or base URL just changed — try the estimate again now that we
+    // (might) have working credentials.
+    refreshEstimate();
   }
 });
 

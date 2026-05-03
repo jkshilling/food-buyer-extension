@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Food Buyer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reads your meal-planner list, adds items to your grocery cart. Stops before checkout.",
   "permissions": [
     "storage",

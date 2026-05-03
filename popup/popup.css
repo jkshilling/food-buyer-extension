@@ -124,6 +124,26 @@ h2 {
 .small { font-size: 11px; }
 .hidden { display: none; }
 
+#estimate-line {
+  margin-top: 4px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#estimate-line .est-amount {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+#estimate-line.over-budget .est-amount {
+  color: #b3261e;
+}
+
+#estimate-line .est-detail {
+  color: #888;
+}
+
 .badge {
   display: inline-block;
   min-width: 22px;
