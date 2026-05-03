@@ -60,6 +60,16 @@
             return;
           }
 
+          case 'ADD_CANDIDATE_BY_URL': {
+            if (!adapter.addCandidateByUrl) {
+              reply(sendResponse, { ok: false, error: 'adapter does not support results-page add' });
+              return;
+            }
+            const result = await adapter.addCandidateByUrl(msg.url);
+            reply(sendResponse, { ok: true, result });
+            return;
+          }
+
           case 'NAVIGATE_TO': {
             // Adapter may want to drive the page (e.g. open a product URL).
             location.href = msg.url;

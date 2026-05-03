@@ -267,7 +267,21 @@ async function runOne(tabId, item, retailerName) {
     };
   }
 
-  const addResult = await navigateAndAdd(tabId, top.url);
+  // Try +Add directly on the search-results page first. Saves a full
+  // navigation per item when the SKU is a single variant. Falls back to
+  // the product-page nav if the card isn't there or is a "Choose options"
+  // variant SKU.
+  let addResult = null;
+  const fastResp = await tabSend(tabId, { type: 'ADD_CANDIDATE_BY_URL', url: top.url });
+  if (fastResp.ok && fastResp.result && fastResp.result.ok) {
+    addResult = fastResp.result;
+  } else {
+    const fastReason = (fastResp.result && fastResp.result.reason) || fastResp.error || 'unknown';
+    // 'card-not-found' or 'needs-options' both mean "use the product page."
+    // Anything else (captcha, click failure) we still try the slower path.
+    addResult = await navigateAndAdd(tabId, top.url);
+    if (addResult.ok) addResult.fellBack = fastReason;
+  }
   if (!addResult.ok) {
     await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
     return {

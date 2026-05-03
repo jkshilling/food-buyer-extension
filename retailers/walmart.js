@@ -31,7 +31,13 @@ const selectors = {
   productSponsored: '[data-automation-id="sponsored-flag"], [data-testid="sponsored-flag"]',
   productAvailability: '[data-automation-id="fulfillment"], [data-testid="fulfillment-text"]',
 
-  addToCartButton: 'button[data-automation-id="atc"], button[aria-label^="Add to cart"]',
+  addToCartButton: 'button[data-automation-id="atc"], button[data-automation-id="add-to-cart"], button[aria-label^="Add to cart"]',
+  // The +Add button on a search-results card. Probed live 2026-05-03:
+  // data-automation-id="add-to-cart" is the stable hook; aria-label fallback
+  // catches re-skinning. Choose-options variants use a different button so
+  // this selector won't match those, which is correct — caller falls back
+  // to navigateAndAdd for those SKUs.
+  cardAddToCartButton: 'button[data-automation-id="add-to-cart"], button[aria-label^="Add to cart - "]',
   cartConfirm: '[data-testid="cart-preview"], [data-automation-id="cart-preview"]',
 
   captchaIndicator: '[data-testid="captcha"], iframe[src*="captcha"], #px-captcha, [id^="px-captcha"]'
@@ -82,21 +88,30 @@ async function openSearch(query) {
 function parsePrice(text) {
   if (!text) return null;
   const cleaned = text.replace(/,/g, '');
-  // Anchor on a $ sign so we get the structured price, not a stray "20" from
-  // the size text Walmart sometimes folds into the price block.
-  const dollar = cleaned.match(/\$(\d+)(?:\.(\d{2}))?/);
-  if (dollar) {
-    const whole = parseInt(dollar[1], 10);
-    const cents = dollar[2] ? parseInt(dollar[2], 10) : 0;
-    return whole + cents / 100;
+
+  // Walmart price block contains BOTH:
+  //   visible spans joined: "$197"   (real price is $1.97 — span-glue artifact)
+  //   screen-reader span:   "current price $1.97"
+  // Prefer the formatted $N.NN match (cents present), even if it appears
+  // later in the string.
+  const formatted = cleaned.match(/\$(\d+)\.(\d{2})/);
+  if (formatted) {
+    return parseInt(formatted[1], 10) + parseInt(formatted[2], 10) / 100;
   }
-  // No dollar sign anywhere — grab digits but treat suspiciously large
-  // grocery-page numbers as joined-cents and divide by 100.
+
+  // Fallback: bare $-prefixed integer. For grocery, anything > $200 is far
+  // more likely to be span-glue than a real price; treat as cents.
+  const dollarOnly = cleaned.match(/\$(\d+)/);
+  if (dollarOnly) {
+    const v = parseInt(dollarOnly[1], 10);
+    return v > 200 ? v / 100 : v;
+  }
+
   const m = cleaned.match(/(\d+(?:\.\d{1,2})?)/);
   if (!m) return null;
   const v = parseFloat(m[1]);
   if (!isFinite(v)) return null;
-  if (Number.isInteger(v) && v > 500) return v / 100;
+  if (Number.isInteger(v) && v > 200) return v / 100;
   return v;
 }
 
@@ -213,6 +228,54 @@ async function addCurrentToCart() {
   return { ok: true, confirmed: !!confirmed };
 }
 
+// Add directly from the search-results page by finding the card whose
+// product link points at `productUrl` and clicking its +Add button. Saves
+// the navigation to the product page when the SKU is a single variant.
+//
+// Returns one of:
+//   { ok: true, viaSearchResults: true, confirmed }
+//   { ok: false, reason: 'card-not-found' }   — chosen card not on page
+//   { ok: false, reason: 'needs-options' }    — no +Add button (variant SKU)
+//   { ok: false, reason: 'click-failed: ...' }
+//
+// Caller (service worker) decides whether to fall back to navigateAndAdd.
+async function addCandidateByUrl(productUrl) {
+  if (isBlocked()) return { ok: false, reason: 'bot-protection-challenge' };
+  if (!productUrl) return { ok: false, reason: 'no-url' };
+
+  const targetKey = productUrl.split('?')[0];
+  const cards = $$(selectors.productCard);
+  let matched = null;
+  for (const card of cards) {
+    const linkEl = $(selectors.productLink, card);
+    const href = linkEl ? linkEl.getAttribute('href') : '';
+    if (!href) continue;
+    const cardUrl = href.startsWith('http') ? href : 'https://www.walmart.com' + href;
+    if (cardUrl.split('?')[0] === targetKey) {
+      matched = card;
+      break;
+    }
+  }
+  if (!matched) return { ok: false, reason: 'card-not-found' };
+
+  const btn = matched.querySelector(selectors.cardAddToCartButton);
+  if (!btn) {
+    // Probably a "Choose options" SKU (multipack, variants). Caller falls
+    // back to navigateAndAdd.
+    return { ok: false, reason: 'needs-options' };
+  }
+  try {
+    btn.scrollIntoView({ block: 'center', behavior: 'instant' });
+  } catch (_) {}
+  try {
+    btn.click();
+  } catch (e) {
+    return { ok: false, reason: 'click-failed: ' + (e && e.message || e) };
+  }
+  const confirmed = await waitFor(selectors.cartConfirm, { timeoutMs: 4000 });
+  return { ok: true, viaSearchResults: true, confirmed: !!confirmed };
+}
+
 export const walmart = {
   name: 'Walmart',
   hostMatches: ['walmart.com', 'www.walmart.com'],
@@ -221,5 +284,6 @@ export const walmart = {
   isBlocked,
   openSearch,
   getCandidates,
-  addCurrentToCart
+  addCurrentToCart,
+  addCandidateByUrl
 };

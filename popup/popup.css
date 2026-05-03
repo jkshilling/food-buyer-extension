@@ -203,6 +203,10 @@ button.ghost:hover:not(:disabled) {
 .result {
   padding: 8px 0;
   border-bottom: 1px solid #f0f0f0;
+  /* Without this, a wide select inside the row can push siblings out of the
+     popup and cause horizontal clipping. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .result:last-child { border-bottom: none; }
@@ -217,7 +221,10 @@ button.ghost:hover:not(:disabled) {
 .result-name {
   font-weight: 500;
   flex: 1;
-  word-break: break-word;
+  min-width: 0;
+  /* overflow-wrap:anywhere breaks long unbreakable strings (product titles
+     with no whitespace) so they don't push the row wider than the popup. */
+  overflow-wrap: anywhere;
 }
 
 .result-status {
@@ -244,10 +251,15 @@ button.ghost:hover:not(:disabled) {
   display: flex;
   gap: 4px;
   align-items: center;
+  /* Without min-width:0 a select sized by its longest <option> ignores
+     flex:1 and just expands forever. */
+  min-width: 0;
 }
 
 .result-override select {
   flex: 1;
+  min-width: 0;
+  max-width: 100%;
   font-size: 11px;
   padding: 2px;
 }
@@ -255,6 +267,8 @@ button.ghost:hover:not(:disabled) {
 .result-override button {
   font-size: 11px;
   padding: 2px 6px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 footer {
