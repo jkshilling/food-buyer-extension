@@ -285,12 +285,16 @@ const syncEls = {
   status: document.querySelector('#sync-status')
 };
 
+// The meal planner is a single deployment for this user; no other base URL
+// is realistic. Default the field to it so first-time setup is just "paste
+// token, click Save."
+const DEFAULT_BASE_URL = 'https://meals.alaskatargeting.com';
+
 async function refreshSyncStatus() {
   const { syncSettings } = await chrome.storage.local.get('syncSettings');
-  if (syncSettings) {
-    syncEls.baseUrl.value = syncSettings.baseUrl || '';
-    syncEls.token.value = '';
-  }
+  // Always pre-fill the base URL: saved value if present, default otherwise.
+  syncEls.baseUrl.value = (syncSettings && syncSettings.baseUrl) || DEFAULT_BASE_URL;
+  syncEls.token.value = '';
   // Make the saved-vs-empty distinction explicit on a separate line so it's
   // visible even when the input is blank.
   const hasToken = !!(syncSettings && syncSettings.token);
