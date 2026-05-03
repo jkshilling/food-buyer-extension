@@ -87,7 +87,7 @@ function renderRetailer() {
     els.retailerHint.textContent = '';
   } else {
     els.retailerName.textContent = 'none detected';
-    els.retailerHint.textContent = 'Open a supported retailer tab (currently: Walmart).';
+    els.retailerHint.textContent = 'No supported retailer tab open in any window. Open walmart.com.';
   }
   renderList();
 }
@@ -182,16 +182,34 @@ async function refreshList() {
 }
 
 async function refreshRetailer() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  let retailer = null;
-  let tabId = null;
-  if (tab && tab.url) {
+  // Preference order:
+  //   1. Active tab in the current window (if it's a retailer)
+  //   2. Most recently active retailer tab in any open window
+  // The "any window" fallback covers the common case where Jordan has a
+  // Walmart tab open but isn't currently looking at it when clicking the
+  // toolbar icon.
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  let pick = null;
+  if (activeTab && activeTab.url) {
     try {
-      retailer = hostnameToRetailer(new URL(tab.url).hostname);
-      tabId = tab.id;
+      const r = hostnameToRetailer(new URL(activeTab.url).hostname);
+      if (r) pick = { name: r, tabId: activeTab.id };
     } catch (_) {}
   }
-  state.retailer = retailer && tabId ? { name: retailer, tabId } : null;
+  if (!pick) {
+    // Walmart-only for now since the other adapters are stubs. Update the
+    // host-permissions in manifest.json if adding more retailers; the URL
+    // patterns here have to stay in sync.
+    const tabs = await chrome.tabs.query({
+      url: ['https://www.walmart.com/*', 'https://walmart.com/*']
+    });
+    if (tabs.length) {
+      // Prefer the most recently accessed one.
+      tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+      pick = { name: 'walmart', tabId: tabs[0].id };
+    }
+  }
+  state.retailer = pick;
   renderRetailer();
 }
 
