@@ -53,6 +53,29 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// Walmart wraps sponsored placements in a tracking redirect:
+//   <a link-identifier="..." href="/sp/track?bt=1&plmt=sb-search-top~..." />
+// alongside the canonical product link:
+//   <a href="/ip/Sara-Lee.../12345" />
+//
+// querySelector with comma-OR'd selectors returns whichever element comes
+// first in document order, regardless of which alternative matched. On
+// sponsored cards the tracking link is first, so we got that URL — which
+// changes per render and never matches anything on subsequent visits.
+//
+// Always prefer an /ip/ link if any anchor in the card has one. Only fall
+// back to a non-tracking link-identifier when there's no /ip/ option.
+function findProductLink(card) {
+  const ipLink = card.querySelector('a[href*="/ip/"]');
+  if (ipLink) return ipLink;
+  const anchors = card.querySelectorAll('a[link-identifier]');
+  for (const a of anchors) {
+    const href = a.getAttribute('href') || '';
+    if (href && !/\/sp\/track/.test(href)) return a;
+  }
+  return null;
+}
+
 async function waitFor(sel, { timeoutMs = 15000, root = document } = {}) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -232,7 +255,7 @@ async function getCandidates() {
     position++;
     const titleEl = $(selectors.productTitle, card);
     const priceEl = $(selectors.productPrice, card);
-    const linkEl = $(selectors.productLink, card);
+    const linkEl = findProductLink(card);
     const sizeEl = $(selectors.productSize, card);
     const imgEl = $(selectors.productImage, card);
     const sponsored = detectSponsored(card);
@@ -326,7 +349,7 @@ async function addCandidateByUrl(productUrl) {
   const targetTail = (targetKey.match(/\/(\d+)$/) || [])[1] || null;
 
   const matchCard = (card) => {
-    const linkEl = $(selectors.productLink, card);
+    const linkEl = findProductLink(card);
     const href = linkEl ? linkEl.getAttribute('href') : '';
     if (!href) return false;
     const cardUrl = normalize(href.startsWith('http') ? href : 'https://www.walmart.com' + href);
