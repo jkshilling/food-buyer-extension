@@ -224,7 +224,7 @@ async function recordSearchEvent({ retailer, query, candidates, chosen, pickSour
     });
   } catch (e) {
     // Sync is best-effort. A failed enqueue must not break the run.
-    console.warn('[food-buyer] enqueueEvent failed:', e);
+    console.warn('[larder] enqueueEvent failed:', e);
   }
 }
 
@@ -375,13 +375,13 @@ async function startRun({ tabId, retailerName }) {
     if (syncSettings && syncSettings.baseUrl && syncSettings.token) {
       const r = await loadFavorites(syncSettings);
       if (r && r.error) {
-        console.warn('[food-buyer] favorites fetch error:', r.error);
+        console.warn('[larder] favorites fetch error:', r.error);
       }
     } else {
       await loadFavorites({});
     }
   } catch (e) {
-    console.warn('[food-buyer] favorites load failed:', e);
+    console.warn('[larder] favorites load failed:', e);
   }
 
   // Make sure the retailer content script is alive in this tab. Catches the

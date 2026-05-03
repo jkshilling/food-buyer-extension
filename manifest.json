@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Food Buyer",
+  "name": "Larder",
   "version": "0.2.0",
   "description": "Reads your meal-planner list, adds items to your grocery cart. Stops before checkout.",
   "permissions": [
@@ -22,7 +22,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Food Buyer",
+    "default_title": "Larder",
     "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",

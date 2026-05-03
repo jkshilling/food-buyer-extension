@@ -17,7 +17,7 @@
     registry = mod.registry;
     adapter = registry.forHost(location.hostname);
   } catch (e) {
-    console.error('[food-buyer] failed to load retailer registry:', e);
+    console.error('[larder] failed to load retailer registry:', e);
   }
 
   function reply(sendResponse, payload) {
