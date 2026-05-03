@@ -228,6 +228,19 @@ function extractSizeFromTitle(title) {
   return m ? m[0].trim() : null;
 }
 
+// The dedicated productSize selector ('span.gray', etc.) often picks up
+// elements that contain something else entirely — most commonly the review
+// count ("3256"). Real sizes always contain a letter (oz, ct, lb, ml, etc.).
+// Reject pure-numeric and empty strings at the source so they never reach
+// the wire payload.
+function cleanInlineSize(s) {
+  if (!s) return null;
+  const trimmed = String(s).trim();
+  if (!trimmed) return null;
+  if (!/[a-zA-Z]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 // Per-unit price ("$9.88/lb"). Best-effort — not present on every card.
 // Worth capturing because it normalizes across pack sizes for catalog
 // browsing and future cross-product comparison.
@@ -276,15 +289,18 @@ async function getCandidates() {
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
-    const inlineSize = sizeEl ? sizeEl.textContent.trim() : '';
+    // Only trust the inline size element if it contains letters; otherwise
+    // it's almost certainly the review count or a star rating leaking
+    // through from a sibling element.
+    const inlineSize = cleanInlineSize(sizeEl ? sizeEl.textContent : '');
     out.push({
       title,
-      // sizeText: prefer the dedicated size element; fall back to a regex
-      // pass over the title since Walmart commonly puts it there too.
+      // Prefer the validated inline size; fall back to a regex pass over
+      // the title since Walmart commonly puts it there too.
       sizeText: inlineSize || extractSizeFromTitle(title),
       unitPrice: extractUnitPrice(card),
       price: extractPrice(priceEl),
-      size: inlineSize,
+      size: inlineSize || '',
       url,
       // Richer fields persisted to the meal-planner via /api/grocery-events.
       // None of these are critical for ranking; they exist for analytics and
