@@ -99,19 +99,24 @@ function parsePrice(text) {
     return parseInt(formatted[1], 10) + parseInt(formatted[2], 10) / 100;
   }
 
-  // Fallback: bare $-prefixed integer. For grocery, anything > $200 is far
-  // more likely to be span-glue than a real price; treat as cents.
+  // Fallback: bare $-prefixed integer means Walmart didn't ship the
+  // screen-reader $N.NN span (or it lost out to span-glue earlier in the
+  // text). The bare-integer outcome is almost always span-glue: the
+  // visible price block is "$" "1" "97" joined to "$197". Threshold of
+  // 100 catches sub-$2 grocery items ($197, $196 = $1.97, $1.96) while
+  // leaving anything under $100 alone — actual grocery prices below $100
+  // would still have a screen-reader span and hit the formatted branch.
   const dollarOnly = cleaned.match(/\$(\d+)/);
   if (dollarOnly) {
     const v = parseInt(dollarOnly[1], 10);
-    return v > 200 ? v / 100 : v;
+    return v >= 100 ? v / 100 : v;
   }
 
   const m = cleaned.match(/(\d+(?:\.\d{1,2})?)/);
   if (!m) return null;
   const v = parseFloat(m[1]);
   if (!isFinite(v)) return null;
-  if (Number.isInteger(v) && v > 200) return v / 100;
+  if (Number.isInteger(v) && v >= 100) return v / 100;
   return v;
 }
 
