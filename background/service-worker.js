@@ -275,15 +275,20 @@ async function runOne(tabId, item, retailerName) {
   // the product-page nav if the card isn't there or is a "Choose options"
   // variant SKU.
   let addResult = null;
+  let pathTaken = null;
   const fastResp = await tabSend(tabId, { type: 'ADD_CANDIDATE_BY_URL', url: top.url });
   if (fastResp.ok && fastResp.result && fastResp.result.ok) {
     addResult = fastResp.result;
+    pathTaken = 'fast +Add on results';
   } else {
     const fastReason = (fastResp.result && fastResp.result.reason) || fastResp.error || 'unknown';
     // 'card-not-found' or 'needs-options' both mean "use the product page."
     // Anything else (captcha, click failure) we still try the slower path.
     addResult = await navigateAndAdd(tabId, top.url);
-    if (addResult.ok) addResult.fellBack = fastReason;
+    if (addResult.ok) {
+      addResult.fellBack = fastReason;
+      pathTaken = 'fell back to product page (' + fastReason + ')';
+    }
   }
   if (!addResult.ok) {
     await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
@@ -297,6 +302,7 @@ async function runOne(tabId, item, retailerName) {
   await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: top, pickSource: 'auto' });
   return {
     status: 'ok',
+    reason: pathTaken,
     candidates: ranked.slice(0, 8),
     chosen: top
   };
