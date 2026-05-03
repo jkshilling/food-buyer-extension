@@ -197,7 +197,6 @@ function toWireResult(c) {
     url: c.url,
     walmartItemId: c.walmartItemId || null,
     title: c.title,
-    brand: c.brand || null,
     // Prefer the better-derived sizeText (inline element OR title regex)
     // over the raw inline-only c.size field.
     sizeText: c.sizeText || c.size || null,
