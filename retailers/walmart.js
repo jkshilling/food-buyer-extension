@@ -14,9 +14,12 @@ const selectors = {
   searchInput: 'input[name="q"], input[aria-label="Search"], input[type="search"]',
   searchButton: 'button[aria-label="Search icon"], button[type="submit"][aria-label*="earch"]',
 
-  productCard: '[data-testid="list-view"] [data-item-id], [data-testid="item-stack"] [data-item-id], div[data-item-id]',
+  // [data-testid="item-stack"] is the search-results region. Scoping to it
+  // avoids picking up carousels and "related items" rows below the fold.
+  // 2026-05-03: probed live, 52 matches inside the stack vs 66 unscoped.
+  productCard: '[data-testid="item-stack"] [data-item-id], div[role="group"][data-item-id], div[data-item-id]',
   productTitle: 'span[data-automation-id="product-title"], span.lh-title, [data-automation-id="product-title"]',
-  productPrice: '[data-automation-id="product-price"] span.mr1, [data-automation-id="product-price"] span, div[data-automation-id="product-price"]',
+  productPrice: '[data-automation-id="product-price"] span.mr1, [data-automation-id="product-price"] span, div[data-automation-id="product-price"], [data-automation-id*="price"]',
   productLink: 'a[link-identifier], a[href*="/ip/"]',
   productSize: '[data-automation-id="product-price"] + div, span.gray, .f7.gray',
   productImage: 'img[data-testid="productTileImage"], img[src*="i5.walmartimages.com"], img[loading="lazy"]',
@@ -134,7 +137,12 @@ async function getCandidates() {
     const sponsored = detectSponsored(card);
     const availabilityEl = $(selectors.productAvailability, card);
 
-    const title = titleEl ? titleEl.textContent.trim() : '';
+    // Title fallback chain: explicit title selector → product link's aria-label
+    // (Walmart's <a link-identifier> usually carries the full product name
+    // there, more stable than the inner span class) → product image alt.
+    let title = titleEl ? titleEl.textContent.trim() : '';
+    if (!title && linkEl) title = (linkEl.getAttribute('aria-label') || '').trim();
+    if (!title && imgEl) title = (imgEl.getAttribute('alt') || '').trim();
     const href = linkEl ? linkEl.getAttribute('href') : '';
     const url = href ? (href.startsWith('http') ? href : 'https://www.walmart.com' + href) : '';
     if (!title || !url) continue;
