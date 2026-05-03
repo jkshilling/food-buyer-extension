@@ -424,6 +424,7 @@ const syncEls = {
   tokenState: document.querySelector('#sync-token-state'),
   statusPill: document.querySelector('#sync-status-pill'),
   saveBtn: document.querySelector('#sync-save-btn'),
+  testBtn: document.querySelector('#sync-test-btn'),
   flushBtn: document.querySelector('#sync-flush-btn'),
   peekBtn: document.querySelector('#sync-peek-btn'),
   clearBtn: document.querySelector('#sync-clear-btn'),
@@ -533,6 +534,45 @@ syncEls.saveBtn.addEventListener('click', async () => {
   // as dots since the input is type="password") so the user knows it
   // persists and can be edited without re-pasting.
   refreshSyncStatus();
+});
+
+// Test the URL + token IN THE FIELDS (not whatever is saved). Hits
+// GET /api/grocery/favorites — cheap, requires auth, returns 401 on bad
+// token, 4xx on bad URL. Replaces the "save and pray" loop with a one-click
+// verification before committing.
+syncEls.testBtn.addEventListener('click', async () => {
+  const baseUrl = syncEls.baseUrl.value.trim().replace(/\/+$/, '');
+  const token = syncEls.token.value.trim();
+  if (!baseUrl) { setSyncPill('Enter a base URL first.', 'fail'); return; }
+  if (!token) { setSyncPill('Enter a token first.', 'fail'); return; }
+
+  syncEls.testBtn.disabled = true;
+  setSyncPill('Testing…');
+  try {
+    const resp = await fetch(baseUrl + '/api/grocery/favorites', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (resp.status === 401) {
+      setSyncPill('✗ Test failed: token rejected (401).', 'fail');
+    } else if (resp.status === 404) {
+      setSyncPill('✗ Test failed: 404 — wrong URL?', 'fail');
+    } else if (!resp.ok) {
+      setSyncPill(`✗ Test failed: HTTP ${resp.status}.`, 'fail');
+    } else {
+      // 200: parse to confirm shape, but a 200 is enough on its own.
+      let count = '';
+      try {
+        const body = await resp.json();
+        if (body && Array.isArray(body.favorites)) count = ` · ${body.favorites.length} favorite${body.favorites.length === 1 ? '' : 's'}`;
+      } catch (_) {}
+      setSyncPill(`✓ Test passed${count}. Click Save to use these credentials.`, 'ok');
+    }
+  } catch (e) {
+    setSyncPill('✗ Test failed: ' + (e && e.message || e), 'fail');
+  } finally {
+    syncEls.testBtn.disabled = false;
+  }
 });
 
 syncEls.flushBtn.addEventListener('click', async () => {
