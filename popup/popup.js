@@ -337,15 +337,16 @@ const DEFAULT_BASE_URL = 'https://meals.alaskatargeting.com';
 
 async function refreshSyncStatus() {
   const { syncSettings } = await chrome.storage.local.get('syncSettings');
-  // Always pre-fill the base URL: saved value if present, default otherwise.
+  // Always pre-fill both fields with the saved values. The input is type=
+  // "password" so the token still renders as dots, but the actual value is
+  // there for editing without re-pasting. Persists across popup opens.
   syncEls.baseUrl.value = (syncSettings && syncSettings.baseUrl) || DEFAULT_BASE_URL;
-  syncEls.token.value = '';
-  // Make the saved-vs-empty distinction explicit on a separate line so it's
-  // visible even when the input is blank.
+  syncEls.token.value = (syncSettings && syncSettings.token) || '';
+
   const hasToken = !!(syncSettings && syncSettings.token);
   if (hasToken) {
     const masked = syncSettings.token.slice(0, 4) + '…' + syncSettings.token.slice(-4);
-    syncEls.tokenState.textContent = `✓ Token saved (${masked}). Leave blank to keep, or paste a new one to replace.`;
+    syncEls.tokenState.textContent = `✓ Token saved (${masked}).`;
     syncEls.tokenState.style.color = '#1f7a3a';
   } else {
     syncEls.tokenState.textContent = 'No token set yet.';
@@ -369,17 +370,16 @@ async function refreshSyncStatus() {
 
 syncEls.saveBtn.addEventListener('click', async () => {
   const baseUrl = syncEls.baseUrl.value.trim();
-  // Only update token if user typed one — keep existing otherwise.
-  const typed = syncEls.token.value.trim();
-  const { syncSettings: existing } = await chrome.storage.local.get('syncSettings');
-  const token = typed || (existing && existing.token) || '';
+  const token = syncEls.token.value.trim();
   if (!baseUrl || !token) {
     syncEls.status.textContent = 'Need both a base URL and a token.';
     return;
   }
   await chrome.storage.local.set({ syncSettings: { baseUrl: baseUrl.replace(/\/+$/, ''), token } });
   syncEls.status.textContent = 'Saved.';
-  syncEls.token.value = '';
+  // Don't clear the token field — keep what was just saved visible (rendered
+  // as dots since the input is type="password") so the user knows it
+  // persists and can be edited without re-pasting.
   refreshSyncStatus();
 });
 
