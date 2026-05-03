@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Food Buyer",
   "version": "0.1.0",
-  "description": "Reads your meal-planner shopping list and adds items to your Walmart cart. Stops before checkout — you review and pay.",
+  "description": "Reads your meal-planner list, adds items to Walmart cart. Stops before checkout.",
   "permissions": [
     "storage",
     "activeTab",
