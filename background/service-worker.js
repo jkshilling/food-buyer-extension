@@ -182,7 +182,10 @@ function toWireResult(c) {
     walmartItemId: c.walmartItemId || null,
     title: c.title,
     brand: c.brand || null,
-    sizeText: c.size || null,
+    // Prefer the better-derived sizeText (inline element OR title regex)
+    // over the raw inline-only c.size field.
+    sizeText: c.sizeText || c.size || null,
+    unitPrice: c.unitPrice || null,
     price: typeof c.price === 'number' ? c.price : null,
     imageUrl: c.imageUrl || null,
     rating: c.rating || null,

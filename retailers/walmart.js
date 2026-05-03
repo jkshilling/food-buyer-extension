@@ -193,6 +193,27 @@ function detectSponsored(card) {
   return txt.includes('sponsored');
 }
 
+// Pull a size string out of the title when the dedicated productSize
+// selector returns nothing. Walmart commonly puts size in the title
+// after a comma ("...Cheese, 12 Slices") so we get useful catalog data
+// even when the inline size element is empty.
+const SIZE_RE = /(\d+(?:\.\d+)?)\s*(fl\s*oz|fluid\s*ounces?|ounces?|oz|lbs?|pounds?|grams?|kg|kilograms?|gallons?|gal|quarts?|qt|pints?|pt|liters?|litres?|ml|milliliters?|count|ct|pack|pk|slices?|pieces?)/i;
+
+function extractSizeFromTitle(title) {
+  if (!title) return null;
+  const m = title.match(SIZE_RE);
+  return m ? m[0].trim() : null;
+}
+
+// Per-unit price ("$9.88/lb"). Best-effort — not present on every card.
+// Worth capturing because it normalizes across pack sizes for catalog
+// browsing and future cross-product comparison.
+function extractUnitPrice(card) {
+  const txt = (card.textContent || '');
+  const m = txt.match(/\$\s*\d+(?:\.\d{2})?\s*\/\s*(?:lb|oz|fl\s*oz|ct|each|ea)/i);
+  return m ? m[0].replace(/\s+/g, '') : null;
+}
+
 async function getCandidates() {
   // Wait for results to render. Walmart hydrates lazily.
   await waitFor(selectors.productCard, { timeoutMs: 12000 });
@@ -232,10 +253,15 @@ async function getCandidates() {
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
+    const inlineSize = sizeEl ? sizeEl.textContent.trim() : '';
     out.push({
       title,
+      // sizeText: prefer the dedicated size element; fall back to a regex
+      // pass over the title since Walmart commonly puts it there too.
+      sizeText: inlineSize || extractSizeFromTitle(title),
+      unitPrice: extractUnitPrice(card),
       price: extractPrice(priceEl),
-      size: sizeEl ? sizeEl.textContent.trim() : '',
+      size: inlineSize,
       url,
       // Richer fields persisted to the meal-planner via /api/grocery-events.
       // None of these are critical for ranking; they exist for analytics and
