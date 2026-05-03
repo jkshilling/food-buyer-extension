@@ -80,32 +80,24 @@ async function openSearch(query) {
   }
 }
 
-// Walmart price parsing is annoying: the visible card now ships the price as
-// separate spans like "$" "5" "28" which .textContent joins to "$528". A
-// naive digit grab returns 528 (off by 100). The reliable signal is the
-// screen-reader span Walmart includes: "current price $5.28". Parse that
-// first; fall back to digit-grab with a sanity check.
-function parsePrice(text) {
+// String-only fallback. Used when we have text but no element to probe.
+function parsePriceFromText(text) {
   if (!text) return null;
   const cleaned = text.replace(/,/g, '');
 
-  // Walmart price block contains BOTH:
-  //   visible spans joined: "$197"   (real price is $1.97 — span-glue artifact)
-  //   screen-reader span:   "current price $1.97"
   // Prefer the formatted $N.NN match (cents present), even if it appears
-  // later in the string.
+  // later in the string. Walmart's screen-reader span looks like
+  //   "current price $1.97"
+  // and accompanies the visible span-glue artifact "$197".
   const formatted = cleaned.match(/\$(\d+)\.(\d{2})/);
   if (formatted) {
     return parseInt(formatted[1], 10) + parseInt(formatted[2], 10) / 100;
   }
 
-  // Fallback: bare $-prefixed integer means Walmart didn't ship the
-  // screen-reader $N.NN span (or it lost out to span-glue earlier in the
-  // text). The bare-integer outcome is almost always span-glue: the
-  // visible price block is "$" "1" "97" joined to "$197". Threshold of
-  // 100 catches sub-$2 grocery items ($197, $196 = $1.97, $1.96) while
-  // leaving anything under $100 alone — actual grocery prices below $100
-  // would still have a screen-reader span and hit the formatted branch.
+  // Bare $-prefixed integer means Walmart didn't ship the screen-reader
+  // $N.NN span (or it lost out to span-glue earlier). The bare-integer
+  // outcome is almost always span-glue: visible spans "$" "1" "97" join
+  // to "$197". Threshold 100 catches sub-$2 grocery items.
   const dollarOnly = cleaned.match(/\$(\d+)/);
   if (dollarOnly) {
     const v = parseInt(dollarOnly[1], 10);
@@ -118,6 +110,54 @@ function parsePrice(text) {
   if (!isFinite(v)) return null;
   if (Number.isInteger(v) && v >= 100) return v / 100;
   return v;
+}
+
+// Element-aware extractor. Probes the four sources Walmart could put a
+// reliably-formatted price in, in order of trustworthiness:
+//
+//   1. aria-label on the price element itself ("$1.97")
+//   2. screen-reader-only inner span (visually hidden via class or
+//      aria-hidden=false on a sr-only element). These contain the
+//      formatted "current price $1.97" string.
+//   3. <meta itemprop="price"> (schema.org markup; Walmart sometimes ships)
+//   4. textContent fallback through parsePriceFromText
+//
+// Returns null when nothing parses, so the meal-planner doesn't store
+// garbage.
+function extractPrice(priceEl) {
+  if (!priceEl) return null;
+
+  // 1. aria-label on the price element. Some Walmart skins put the
+  //    formatted price here as the screen-reader hint.
+  const aria = priceEl.getAttribute('aria-label');
+  if (aria) {
+    const v = parsePriceFromText(aria);
+    if (v != null) return v;
+  }
+
+  // 2. Visually-hidden sr-only span. Walmart's class names rotate between
+  //    skins ("vh", "w_DBak", "f6 mb1", etc.); rather than chase them, find
+  //    any descendant whose text contains "current price" or "Now $N.NN" —
+  //    that's the screen-reader pattern.
+  const innerSpans = priceEl.querySelectorAll('span, div');
+  for (const s of innerSpans) {
+    const t = (s.textContent || '').trim();
+    if (!t) continue;
+    if (/current price|^was\b|^now\b|^price\b/i.test(t) && /\$\d+\.\d{2}/.test(t)) {
+      const v = parsePriceFromText(t);
+      if (v != null) return v;
+    }
+  }
+
+  // 3. Schema.org markup. Cheap to check.
+  const meta = priceEl.querySelector('meta[itemprop="price"]') || document.querySelector('meta[itemprop="price"]');
+  if (meta) {
+    const c = parseFloat(meta.getAttribute('content'));
+    if (isFinite(c) && c > 0) return c;
+  }
+
+  // 4. textContent fallback. Last resort because of the span-glue trap.
+  return parsePriceFromText(priceEl.textContent || '');
 }
 
 // Pull the SKU id out of a Walmart product URL. Format is typically
@@ -194,7 +234,7 @@ async function getCandidates() {
 
     out.push({
       title,
-      price: parsePrice(priceEl ? priceEl.textContent : ''),
+      price: extractPrice(priceEl),
       size: sizeEl ? sizeEl.textContent.trim() : '',
       url,
       // Richer fields persisted to the meal-planner via /api/grocery-events.
