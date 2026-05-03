@@ -282,6 +282,7 @@ const syncEls = {
   tokenState: document.querySelector('#sync-token-state'),
   saveBtn: document.querySelector('#sync-save-btn'),
   flushBtn: document.querySelector('#sync-flush-btn'),
+  clearBtn: document.querySelector('#sync-clear-btn'),
   status: document.querySelector('#sync-status')
 };
 
@@ -343,6 +344,17 @@ syncEls.flushBtn.addEventListener('click', async () => {
   syncEls.status.textContent = 'Flushing…';
   const r = await send({ type: 'SYNC_FLUSH' });
   syncEls.flushBtn.disabled = false;
+  refreshSyncStatus();
+});
+
+syncEls.clearBtn.addEventListener('click', async () => {
+  // Confirm because this drops local pending events that the meal planner
+  // hasn't yet received. Anything already synced lives on the server and is
+  // unaffected.
+  if (!confirm('Drop all events waiting to sync? Anything already sent to the meal planner stays. This cannot be undone.')) return;
+  syncEls.clearBtn.disabled = true;
+  await send({ type: 'SYNC_CLEAR_BUFFER' });
+  syncEls.clearBtn.disabled = false;
   refreshSyncStatus();
 });
 

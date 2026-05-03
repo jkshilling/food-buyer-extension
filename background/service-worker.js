@@ -246,8 +246,9 @@ async function runOne(tabId, item, retailerName) {
   const klass = classify(top._score);
 
   if (klass === 'review') {
-    // Don't record a pick yet — user may override. The override path records
-    // its own event with pickSource='override'.
+    // Record the candidates so price/product data still flows. Don't record
+    // a pick yet — user may override. The override path records its own
+    // event with pickSource='override' and the chosen URL.
     await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
     return {
       status: 'review',
@@ -469,6 +470,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case 'SYNC_FLUSH': {
           const r = await flushNow();
           sendResponse({ ok: true, result: r });
+          break;
+        }
+        case 'SYNC_CLEAR_BUFFER': {
+          await chrome.storage.local.remove(['syncBuffer', 'syncLastResult']);
+          sendResponse({ ok: true });
           break;
         }
         case 'SYNC_STATUS': {
