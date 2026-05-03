@@ -63,6 +63,17 @@
   // Initial capture.
   schedule();
 
+  // Allow the popup to ask for a fresh re-extract on open without doing a
+  // full chrome.tabs.reload (which is slow and resets scroll/inputs).
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg && msg.type === 'EXTRACT_NOW') {
+      const items = extract();
+      send(items);
+      try { sendResponse({ ok: true, count: items.length }); } catch (_) {}
+      return true;
+    }
+  });
+
   // Watch for any mutation inside the shopping table — row adds, edits, toggles.
   const table = document.querySelector('table.grid-table');
   if (table) {

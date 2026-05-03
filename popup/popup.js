@@ -179,6 +179,17 @@ async function refreshList() {
   const { shoppingList } = await chrome.storage.local.get('shoppingList');
   state.list = shoppingList || null;
   renderList();
+
+  // Best-effort: ping any open meal-planner shopping tab to re-extract NOW
+  // (no tab reload). The content script's own auto-update covers edits made
+  // while the tab is open; this catches edits made on another device or when
+  // the tab was reopened after being closed.
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://meals.alaskatargeting.com/plan/*/shopping*' });
+    if (tabs.length) {
+      chrome.tabs.sendMessage(tabs[0].id, { type: 'EXTRACT_NOW' }, () => { void chrome.runtime.lastError; });
+    }
+  } catch (_) {}
 }
 
 async function refreshRetailer() {
@@ -223,12 +234,15 @@ async function refreshRun() {
 // ---------- handlers ----------
 
 els.refreshBtn.addEventListener('click', async () => {
+  // Hard refresh: full tab reload. Use only when the soft re-extract
+  // (refreshList → EXTRACT_NOW) isn't enough — e.g. the page is in a
+  // weird state. The popup auto-runs the soft path on every open.
   const tabs = await chrome.tabs.query({ url: 'https://meals.alaskatargeting.com/plan/*/shopping*' });
   if (tabs.length) {
     await chrome.tabs.reload(tabs[0].id);
-    setStatus('Reloaded meal-planner tab.');
+    setStatus('Hard-reloaded meal-planner tab.');
   } else {
-    setStatus('No meal-planner shopping tab open.');
+    setStatus('No meal-planner shopping tab open — open one to refresh.');
   }
   setTimeout(refreshList, 1500);
 });
