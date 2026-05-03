@@ -246,6 +246,11 @@ els.stopBtn.addEventListener('click', async () => {
   setStatus('Stop requested — finishing current item.');
 });
 
+document.querySelector('#clear-results-btn').addEventListener('click', async () => {
+  await send({ type: 'CLEAR_RUN_STATE' });
+  setStatus('Results cleared.');
+});
+
 // Live updates while popup is open.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;

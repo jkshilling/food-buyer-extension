@@ -53,7 +53,10 @@
   </section>
 
   <section id="results-section" class="section hidden">
-    <h2>Results</h2>
+    <div class="row between">
+      <h2>Results</h2>
+      <button id="clear-results-btn" class="ghost" title="Clear the results from the last run">clear</button>
+    </div>
     <ul id="results-list"></ul>
   </section>
 
@@ -80,7 +83,7 @@
       <div class="row">
         <button id="sync-save-btn" class="primary">Save</button>
         <button id="sync-flush-btn" class="ghost">Flush now</button>
-        <button id="sync-clear-btn" class="ghost">Clear buffer</button>
+        <button id="sync-clear-btn" class="ghost" title="Drop unsent events from past runs (does not affect run results shown on the Run tab, or anything already synced to the server)">Clear unsent</button>
       </div>
       <div id="sync-status" class="muted small"></div>
     </section>
