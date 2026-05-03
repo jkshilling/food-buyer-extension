@@ -22,7 +22,10 @@ const selectors = {
   productImage: 'img[data-testid="productTileImage"], img[src*="i5.walmartimages.com"], img[loading="lazy"]',
   productRating: '[data-testid="reviews-rating"], [aria-label*="out of 5"], span[class*="rating"]',
   productReviewCount: '[data-testid="reviews-count"], a[aria-label*="rating"], span[class*="review-count"]',
-  productSponsored: '[data-automation-id="sponsored-flag"], span:has-text("Sponsored")',
+  // querySelector doesn't support :has-text — that's Playwright syntax. We
+  // probe for the data attribute here and fall back to a text-content scan
+  // in detectSponsored() below.
+  productSponsored: '[data-automation-id="sponsored-flag"], [data-testid="sponsored-flag"]',
   productAvailability: '[data-automation-id="fulfillment"], [data-testid="fulfillment-text"]',
 
   addToCartButton: 'button[data-automation-id="atc"], button[aria-label^="Add to cart"]',
@@ -98,6 +101,15 @@ function parseReviewCount(card) {
   return m ? parseInt(m[1], 10) : null;
 }
 
+// Sponsored detection: prefer the data-attr selector, fall back to scanning
+// the card's text for the literal word "Sponsored". Walmart sometimes ships
+// the marker as plain text inside a span with no useful attributes.
+function detectSponsored(card) {
+  if ($(selectors.productSponsored, card)) return true;
+  const txt = (card.textContent || '').toLowerCase();
+  return txt.includes('sponsored');
+}
+
 async function getCandidates() {
   // Wait for results to render. Walmart hydrates lazily.
   await waitFor(selectors.productCard, { timeoutMs: 12000 });
@@ -119,7 +131,7 @@ async function getCandidates() {
     const linkEl = $(selectors.productLink, card);
     const sizeEl = $(selectors.productSize, card);
     const imgEl = $(selectors.productImage, card);
-    const sponsoredEl = $(selectors.productSponsored, card);
+    const sponsored = detectSponsored(card);
     const availabilityEl = $(selectors.productAvailability, card);
 
     const title = titleEl ? titleEl.textContent.trim() : '';
@@ -144,7 +156,7 @@ async function getCandidates() {
       imageUrl: imgEl ? (imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || null) : null,
       rating: parseRating(card),
       reviewCount: parseReviewCount(card),
-      sponsored: !!sponsoredEl,
+      sponsored,
       availability: availabilityEl ? availabilityEl.textContent.trim().slice(0, 100) : null,
       position
     });
