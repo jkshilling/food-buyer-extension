@@ -1,0 +1,23 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor cruft
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local notes
+notes/
+TODO.local.md
+
+# Built artifacts (no build step today, but reserve)
+dist/
+*.zip
+*.crx
+*.pem
+
+# Node, just in case anyone adds tooling later
+node_modules/
+npm-debug.log*

@@ -1,0 +1,141 @@
+// Walmart adapter.
+//
+// Selectors are the realistic flake point. Walmart rotates DOM frequently and
+// uses PerimeterX bot protection. Keep all DOM coupling in `selectors` so
+// the next time something breaks, only one block needs editing.
+//
+// The adapter assumes it is running in the user's real, logged-in browser
+// session — that's the whole reason this is a Chrome extension and not
+// server-side Playwright (see README).
+
+const SEARCH_URL = (q) => `https://www.walmart.com/search?q=${encodeURIComponent(q)}`;
+
+const selectors = {
+  searchInput: 'input[name="q"], input[aria-label="Search"], input[type="search"]',
+  searchButton: 'button[aria-label="Search icon"], button[type="submit"][aria-label*="earch"]',
+
+  productCard: '[data-testid="list-view"] [data-item-id], [data-testid="item-stack"] [data-item-id], div[data-item-id]',
+  productTitle: 'span[data-automation-id="product-title"], span.lh-title, [data-automation-id="product-title"]',
+  productPrice: '[data-automation-id="product-price"] span.mr1, [data-automation-id="product-price"] span, div[data-automation-id="product-price"]',
+  productLink: 'a[link-identifier], a[href*="/ip/"]',
+  productSize: '[data-automation-id="product-price"] + div, span.gray, .f7.gray',
+
+  addToCartButton: 'button[data-automation-id="atc"], button[aria-label^="Add to cart"]',
+  cartConfirm: '[data-testid="cart-preview"], [data-automation-id="cart-preview"]',
+
+  captchaIndicator: '[data-testid="captcha"], iframe[src*="captcha"], #px-captcha, [id^="px-captcha"]'
+};
+
+function $(sel, root = document) {
+  return root.querySelector(sel);
+}
+function $$(sel, root = document) {
+  return Array.from(root.querySelectorAll(sel));
+}
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitFor(sel, { timeoutMs = 15000, root = document } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const el = root.querySelector(sel);
+    if (el) return el;
+    await sleep(150);
+  }
+  return null;
+}
+
+function isBlocked() {
+  return !!document.querySelector(selectors.captchaIndicator);
+}
+
+async function openSearch(query) {
+  if (!query) return;
+  // Cheapest reliable path: drive the URL. Avoids brittle "find the search box,
+  // type into it, click submit" dance which breaks every time Walmart shuffles
+  // the header.
+  const target = SEARCH_URL(query);
+  if (location.href !== target) {
+    location.href = target;
+    // Navigation interrupts execution; the popup orchestrator will re-message
+    // the (reloaded) content script after the page settles.
+  }
+}
+
+function parsePrice(text) {
+  if (!text) return null;
+  const m = text.replace(/,/g, '').match(/(\d+(?:\.\d{1,2})?)/);
+  return m ? parseFloat(m[1]) : null;
+}
+
+async function getCandidates() {
+  // Wait for results to render. Walmart hydrates lazily.
+  await waitFor(selectors.productCard, { timeoutMs: 12000 });
+  await sleep(500);
+
+  if (isBlocked()) {
+    return { blocked: true, items: [] };
+  }
+
+  const cards = $$(selectors.productCard);
+  const out = [];
+  const seen = new Set();
+
+  for (const card of cards) {
+    const titleEl = $(selectors.productTitle, card);
+    const priceEl = $(selectors.productPrice, card);
+    const linkEl = $(selectors.productLink, card);
+    const sizeEl = $(selectors.productSize, card);
+
+    const title = titleEl ? titleEl.textContent.trim() : '';
+    const href = linkEl ? linkEl.getAttribute('href') : '';
+    const url = href ? (href.startsWith('http') ? href : 'https://www.walmart.com' + href) : '';
+    if (!title || !url) continue;
+
+    // De-dupe by product URL — sponsored placements often repeat the same SKU.
+    const dedupeKey = url.split('?')[0];
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    out.push({
+      title,
+      price: parsePrice(priceEl ? priceEl.textContent : ''),
+      size: sizeEl ? sizeEl.textContent.trim() : '',
+      url
+    });
+    if (out.length >= 10) break;
+  }
+
+  return { blocked: false, items: out };
+}
+
+async function addCurrentToCart() {
+  if (isBlocked()) {
+    return { ok: false, reason: 'bot-protection-challenge' };
+  }
+  const btn = await waitFor(selectors.addToCartButton, { timeoutMs: 10000 });
+  if (!btn) {
+    return { ok: false, reason: 'add-to-cart-button-not-found' };
+  }
+  // Real user gesture: a synthetic click() from a content script is treated
+  // as trusted by the page since the script runs in the page context's event
+  // loop with isolated-world privileges. This is fine for non-payment actions.
+  btn.click();
+
+  // Best-effort confirmation: cart preview / toast appears. We don't pretend
+  // to authoritatively verify cart state — see README tradeoffs.
+  const confirmed = await waitFor(selectors.cartConfirm, { timeoutMs: 4000 });
+  return { ok: true, confirmed: !!confirmed };
+}
+
+export const walmart = {
+  name: 'Walmart',
+  hostMatches: ['walmart.com', 'www.walmart.com'],
+  searchUrl: SEARCH_URL,
+  selectors,
+  isBlocked,
+  openSearch,
+  getCandidates,
+  addCurrentToCart
+};

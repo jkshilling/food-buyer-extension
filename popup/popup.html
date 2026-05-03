@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Food Buyer</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <h1>Food Buyer</h1>
+    <div id="status-line" class="status-line">Loading…</div>
+  </header>
+
+  <section id="list-section" class="section">
+    <div class="row between">
+      <div>
+        <span id="item-count" class="badge">0</span>
+        <span class="muted">items in shopping list</span>
+      </div>
+      <button id="refresh-btn" class="ghost" title="Re-read from active meal-planner tab">refresh</button>
+    </div>
+    <div id="source-line" class="muted small"></div>
+  </section>
+
+  <section id="retailer-section" class="section">
+    <div class="row between">
+      <div>
+        Retailer:
+        <strong id="retailer-name">none detected</strong>
+      </div>
+      <button id="open-walmart-btn" class="ghost">open walmart.com</button>
+    </div>
+    <div id="retailer-hint" class="muted small"></div>
+  </section>
+
+  <section class="section">
+    <button id="run-btn" class="primary" disabled>Add all to cart</button>
+    <button id="stop-btn" class="ghost" disabled>Stop</button>
+  </section>
+
+  <section id="progress-section" class="section hidden">
+    <div class="row between">
+      <div><span id="progress-text">0 / 0</span></div>
+      <div class="muted small" id="progress-elapsed"></div>
+    </div>
+    <div class="progress-bar"><div id="progress-bar-fill"></div></div>
+  </section>
+
+  <section id="results-section" class="section hidden">
+    <h2>Results</h2>
+    <ul id="results-list"></ul>
+  </section>
+
+  <footer>
+    <p class="muted small">
+      Stops before checkout. You review and check out manually.
+    </p>
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+{
+  "manifest_version": 3,
+  "name": "Food Buyer",
+  "version": "0.1.0",
+  "description": "Reads a shopping list from your meal planner and adds items to your grocery cart on supported retailer sites. Stops before checkout.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://meals.alaskatargeting.com/*",
+    "https://www.walmart.com/*",
+    "https://walmart.com/*",
+    "https://www.target.com/*",
+    "https://target.com/*",
+    "https://www.kroger.com/*",
+    "https://kroger.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Food Buyer",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://meals.alaskatargeting.com/plan/*/shopping*"],
+      "js": ["content-scripts/meal-planner.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.walmart.com/*",
+        "https://walmart.com/*",
+        "https://www.target.com/*",
+        "https://target.com/*",
+        "https://www.kroger.com/*",
+        "https://kroger.com/*"
+      ],
+      "js": ["content-scripts/retailer.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["retailers/*.js"],
+      "matches": [
+        "https://www.walmart.com/*",
+        "https://walmart.com/*",
+        "https://www.target.com/*",
+        "https://target.com/*",
+        "https://www.kroger.com/*",
+        "https://kroger.com/*"
+      ]
+    }
+  ]
+}
