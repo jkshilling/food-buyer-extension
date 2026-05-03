@@ -15,6 +15,7 @@
 
 import { rankCandidates, classify, searchQueryFor } from '../lib/ranking.js';
 import { enqueueEvent, flushNow, bufferSize } from '../lib/sync.js';
+import { loadFavorites, findFavorite, favoritesCount } from '../lib/favorites.js';
 
 const RETAILER_HOSTS = {
   walmart: ['walmart.com', 'www.walmart.com'],
@@ -159,6 +160,21 @@ function waitForTabComplete(tabId, timeoutMs = 30000) {
 
 // ---------- run loop ----------
 
+// Add a candidate to the cart. Tries the fast +Add path on the search
+// results page first; falls back to navigating to the product page if the
+// card isn't on the page or is a "Choose options" variant SKU. Returns
+// the inner adapter result with `fellBack` set when the slow path won.
+async function tryAddCandidate(tabId, candidate) {
+  const fastResp = await tabSend(tabId, { type: 'ADD_CANDIDATE_BY_URL', url: candidate.url });
+  if (fastResp.ok && fastResp.result && fastResp.result.ok) {
+    return fastResp.result;
+  }
+  const fastReason = (fastResp.result && fastResp.result.reason) || fastResp.error || 'unknown';
+  const slow = await navigateAndAdd(tabId, candidate.url);
+  if (slow.ok) slow.fellBack = fastReason;
+  return slow;
+}
+
 async function navigateAndAdd(tabId, url) {
   await chrome.tabs.update(tabId, { url });
   await waitForTabComplete(tabId);
@@ -244,6 +260,35 @@ async function runOne(tabId, item, retailerName) {
     return { status: 'fail', reason: 'no search results' };
   }
 
+  // Favorite override: if any candidate matches a user-favorited product
+  // (by URL or Walmart item ID), pick that one and skip ranking entirely.
+  // Favorites are a hard signal of "this is the SKU I always want" — no
+  // probabilistic interpretation, no scoring, no review threshold.
+  const fav = findFavorite(candidatesRaw);
+  if (fav) {
+    const ranked = rankCandidates(item, candidatesRaw);
+    // Bubble the favorite to the top of the candidates list so the popup
+    // dropdown shows it first if the user wants to inspect or override.
+    const reordered = [fav].concat(ranked.filter((c) => c.url !== fav.url));
+    const addResult = await tryAddCandidate(tabId, fav);
+    if (!addResult.ok) {
+      await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
+      return {
+        status: 'fail',
+        reason: 'favorite ' + (addResult.reason || 'add failed'),
+        candidates: reordered.slice(0, 8),
+        chosen: fav
+      };
+    }
+    await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: fav, pickSource: 'favorite' });
+    return {
+      status: 'ok',
+      reason: 'favorite' + (addResult.fellBack ? ' (fell back to product page: ' + addResult.fellBack + ')' : ''),
+      candidates: reordered.slice(0, 8),
+      chosen: fav
+    };
+  }
+
   const ranked = rankCandidates(item, candidatesRaw);
   const top = ranked[0];
   const klass = classify(top._score);
@@ -270,26 +315,9 @@ async function runOne(tabId, item, retailerName) {
     };
   }
 
-  // Try +Add directly on the search-results page first. Saves a full
-  // navigation per item when the SKU is a single variant. Falls back to
-  // the product-page nav if the card isn't there or is a "Choose options"
-  // variant SKU.
-  let addResult = null;
-  let pathTaken = null;
-  const fastResp = await tabSend(tabId, { type: 'ADD_CANDIDATE_BY_URL', url: top.url });
-  if (fastResp.ok && fastResp.result && fastResp.result.ok) {
-    addResult = fastResp.result;
-    pathTaken = 'fast +Add on results';
-  } else {
-    const fastReason = (fastResp.result && fastResp.result.reason) || fastResp.error || 'unknown';
-    // 'card-not-found' or 'needs-options' both mean "use the product page."
-    // Anything else (captcha, click failure) we still try the slower path.
-    addResult = await navigateAndAdd(tabId, top.url);
-    if (addResult.ok) {
-      addResult.fellBack = fastReason;
-      pathTaken = 'fell back to product page (' + fastReason + ')';
-    }
-  }
+  const addResult = await tryAddCandidate(tabId, top);
+  const pathTaken = addResult.viaSearchResults ? 'fast +Add on results' :
+                    addResult.fellBack ? 'fell back to product page (' + addResult.fellBack + ')' : null;
   if (!addResult.ok) {
     await recordSearchEvent({ retailer: retailerName, query, candidates: candidatesRaw, chosen: null, pickSource: 'failed' });
     return {
@@ -340,6 +368,23 @@ async function startRun({ tabId, retailerName }) {
   };
   await persistRunState();
 
+  // Pull the user's favorites from the meal planner. Cached for the
+  // duration of this run; findFavorite() in runOne reads from this cache.
+  // Best-effort: a fetch failure means runs with no favorite override.
+  try {
+    const { syncSettings } = await chrome.storage.local.get('syncSettings');
+    if (syncSettings && syncSettings.baseUrl && syncSettings.token) {
+      const r = await loadFavorites(syncSettings);
+      if (r && r.error) {
+        console.warn('[food-buyer] favorites fetch error:', r.error);
+      }
+    } else {
+      await loadFavorites({});
+    }
+  } catch (e) {
+    console.warn('[food-buyer] favorites load failed:', e);
+  }
+
   // Make sure the retailer content script is alive in this tab. Catches the
   // common case of "user reloaded the extension but didn't reload the
   // walmart.com tab," which orphans the content script.
@@ -355,6 +400,10 @@ async function startRun({ tabId, retailerName }) {
   // Fire-and-forget the loop. Caller doesn't wait.
   (async () => {
     try {
+      const favCount = favoritesCount();
+      if (favCount > 0) {
+        await setRunStatusLine(`Loaded ${favCount} favorite(s) — those will override ranking.`);
+      }
       for (let i = 0; i < shoppingList.items.length; i++) {
         if (stopRequested) break;
         const item = shoppingList.items[i];

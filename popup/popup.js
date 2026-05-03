@@ -137,12 +137,13 @@ function renderRun() {
     if (r.chosen) {
       parts.push(`→ ${r.chosen.title}` + (r.chosen.price != null ? ` ($${r.chosen.price.toFixed(2)})` : ''));
     }
-    // For non-ok rows, always show the reason. For ok rows, only show it
-    // when it indicates the slower fallback path (so the user knows when a
-    // SKU forced a product-page visit instead of using fast +Add).
+    // For non-ok rows, always show the reason. For ok rows, surface it when
+    // it tells the user something useful: that the slower fallback path was
+    // taken, OR that a favorite override was applied.
     if (r.reason) {
       const isFallbackInfo = r.status === 'ok' && /fell back|product page/i.test(r.reason);
-      if (r.status !== 'ok' || isFallbackInfo) parts.push(r.reason);
+      const isFavoriteInfo = r.status === 'ok' && /^favorite/i.test(r.reason);
+      if (r.status !== 'ok' || isFallbackInfo || isFavoriteInfo) parts.push(r.reason);
     }
     meta.textContent = parts.join(' — ');
     li.appendChild(meta);
