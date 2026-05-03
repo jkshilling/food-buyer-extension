@@ -74,10 +74,30 @@ async function openSearch(query) {
   }
 }
 
+// Walmart price parsing is annoying: the visible card now ships the price as
+// separate spans like "$" "5" "28" which .textContent joins to "$528". A
+// naive digit grab returns 528 (off by 100). The reliable signal is the
+// screen-reader span Walmart includes: "current price $5.28". Parse that
+// first; fall back to digit-grab with a sanity check.
 function parsePrice(text) {
   if (!text) return null;
-  const m = text.replace(/,/g, '').match(/(\d+(?:\.\d{1,2})?)/);
-  return m ? parseFloat(m[1]) : null;
+  const cleaned = text.replace(/,/g, '');
+  // Anchor on a $ sign so we get the structured price, not a stray "20" from
+  // the size text Walmart sometimes folds into the price block.
+  const dollar = cleaned.match(/\$(\d+)(?:\.(\d{2}))?/);
+  if (dollar) {
+    const whole = parseInt(dollar[1], 10);
+    const cents = dollar[2] ? parseInt(dollar[2], 10) : 0;
+    return whole + cents / 100;
+  }
+  // No dollar sign anywhere — grab digits but treat suspiciously large
+  // grocery-page numbers as joined-cents and divide by 100.
+  const m = cleaned.match(/(\d+(?:\.\d{1,2})?)/);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  if (!isFinite(v)) return null;
+  if (Number.isInteger(v) && v > 500) return v / 100;
+  return v;
 }
 
 // Pull the SKU id out of a Walmart product URL. Format is typically

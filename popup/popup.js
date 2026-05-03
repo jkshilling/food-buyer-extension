@@ -133,11 +133,14 @@ function renderRun() {
 
     const meta = document.createElement('div');
     meta.className = 'result-meta';
+    const parts = [];
     if (r.chosen) {
-      meta.textContent = `→ ${r.chosen.title}` + (r.chosen.price != null ? ` ($${r.chosen.price.toFixed(2)})` : '');
-    } else if (r.reason) {
-      meta.textContent = r.reason;
+      parts.push(`→ ${r.chosen.title}` + (r.chosen.price != null ? ` ($${r.chosen.price.toFixed(2)})` : ''));
     }
+    // Always surface the reason for fail/review — the chosen line alone hid
+    // it before, so users saw a red FAIL with no explanation.
+    if (r.reason && r.status !== 'ok') parts.push(r.reason);
+    meta.textContent = parts.join(' — ');
     li.appendChild(meta);
 
     if (r.candidates && r.candidates.length > 1) {
