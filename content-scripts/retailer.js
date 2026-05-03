@@ -17,7 +17,10 @@
     registry = mod.registry;
     adapter = registry.forHost(location.hostname);
   } catch (e) {
-    console.error('[larder] failed to load retailer registry:', e);
+    // warn, not error — error-level logs from content scripts can persistently
+    // light the chrome://extensions orange-dot indicator. Adapter failures
+    // are visible in the popup Results section and SW logs anyway.
+    console.warn('[larder] failed to load retailer registry:', e);
   }
 
   function reply(sendResponse, payload) {
