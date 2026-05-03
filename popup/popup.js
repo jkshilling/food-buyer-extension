@@ -287,8 +287,10 @@ const syncEls = {
   tokenState: document.querySelector('#sync-token-state'),
   saveBtn: document.querySelector('#sync-save-btn'),
   flushBtn: document.querySelector('#sync-flush-btn'),
+  peekBtn: document.querySelector('#sync-peek-btn'),
   clearBtn: document.querySelector('#sync-clear-btn'),
-  status: document.querySelector('#sync-status')
+  status: document.querySelector('#sync-status'),
+  bufferList: document.querySelector('#sync-buffer-list')
 };
 
 // The meal planner is a single deployment for this user; no other base URL
@@ -353,14 +355,49 @@ syncEls.flushBtn.addEventListener('click', async () => {
 });
 
 syncEls.clearBtn.addEventListener('click', async () => {
-  // Confirm because this drops local pending events that the meal planner
-  // hasn't yet received. Anything already synced lives on the server and is
-  // unaffected.
   if (!confirm('Drop all events waiting to sync? Anything already sent to the meal planner stays. This cannot be undone.')) return;
   syncEls.clearBtn.disabled = true;
   await send({ type: 'SYNC_CLEAR_BUFFER' });
   syncEls.clearBtn.disabled = false;
+  syncEls.bufferList.classList.add('hidden');
   refreshSyncStatus();
+});
+
+syncEls.peekBtn.addEventListener('click', async () => {
+  if (!syncEls.bufferList.classList.contains('hidden')) {
+    syncEls.bufferList.classList.add('hidden');
+    syncEls.peekBtn.textContent = 'View unsent';
+    return;
+  }
+  const r = await send({ type: 'SYNC_BUFFER_PEEK' });
+  syncEls.bufferList.innerHTML = '';
+  const summary = (r && r.summary) || [];
+  if (!summary.length) {
+    const li = document.createElement('li');
+    li.className = 'meta';
+    li.textContent = 'Buffer is empty.';
+    syncEls.bufferList.appendChild(li);
+  } else {
+    summary.forEach((e) => {
+      const li = document.createElement('li');
+      const q = document.createElement('div');
+      q.className = 'bq';
+      q.textContent = `${e.retailer || '?'} — "${e.query || ''}"`;
+      const m = document.createElement('div');
+      m.className = 'meta';
+      const bits = [];
+      bits.push(`${e.resultCount} result${e.resultCount === 1 ? '' : 's'}`);
+      bits.push(e.pickSource);
+      if (e.pickedTitle) bits.push(`picked: ${e.pickedTitle}`);
+      if (e.searchedAt) bits.push(new Date(e.searchedAt).toLocaleTimeString());
+      m.textContent = bits.join(' · ');
+      li.appendChild(q);
+      li.appendChild(m);
+      syncEls.bufferList.appendChild(li);
+    });
+  }
+  syncEls.bufferList.classList.remove('hidden');
+  syncEls.peekBtn.textContent = 'Hide unsent';
 });
 
 (function init() {

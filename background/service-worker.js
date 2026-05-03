@@ -477,6 +477,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
         }
+        case 'SYNC_BUFFER_PEEK': {
+          // Return a summary of each buffered event so the user can see what
+          // would be dropped before clicking Clear unsent. Just the fields
+          // needed to recognize the event; full results array stays out.
+          const { syncBuffer } = await chrome.storage.local.get('syncBuffer');
+          const buf = Array.isArray(syncBuffer) ? syncBuffer : [];
+          const summary = buf.map((e) => ({
+            retailer: e.retailer,
+            query: e.query,
+            pickSource: e.pickSource,
+            resultCount: Array.isArray(e.results) ? e.results.length : 0,
+            pickedTitle: e.pickedUrl ? (Array.isArray(e.results) ? (e.results.find((r) => r.url === e.pickedUrl) || {}).title || null : null) : null,
+            searchedAt: e.searchedAt
+          }));
+          sendResponse({ ok: true, summary });
+          break;
+        }
         case 'SYNC_STATUS': {
           const [{ syncSettings }, size, { syncLastResult }] = await Promise.all([
             chrome.storage.local.get('syncSettings'),
