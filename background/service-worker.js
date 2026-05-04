@@ -561,6 +561,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true });
           break;
         }
+        case 'RESET_ALL': {
+          // One-shot "factory reset" of grocery state: wipes the user's
+          // server-side data via /api/grocery/reset, then drops local
+          // state too. Keeps syncSettings (the token + base URL) so the
+          // user doesn't have to re-paste; keeps shoppingList (it's
+          // re-extracted from the meal-planner page anyway).
+          const { syncSettings } = await chrome.storage.local.get('syncSettings');
+          let serverDeleted = null;
+          let serverError = null;
+          if (syncSettings && syncSettings.baseUrl && syncSettings.token) {
+            try {
+              const resp = await fetch(syncSettings.baseUrl.replace(/\/+$/, '') + '/api/grocery/reset', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + syncSettings.token }
+              });
+              const body = await resp.json().catch(() => null);
+              if (resp.ok && body && body.ok) {
+                serverDeleted = body.deleted || {};
+              } else {
+                serverError = (body && body.error) || ('http ' + resp.status);
+              }
+            } catch (e) {
+              serverError = String(e && e.message || e);
+            }
+          } else {
+            serverError = 'sync not configured — server data not touched';
+          }
+          // Local: drop everything except the user's saved sync settings.
+          await chrome.storage.local.remove([
+            'runState',
+            'syncBuffer',
+            'syncLastResult',
+            'syncLastRejected'
+            // shoppingList stays — re-extracts from the meal-planner page on
+            // next visit. syncSettings stays — keeps the token saved.
+          ]);
+          stopRequested = false;
+          runState = null;
+          await chrome.action.setBadgeText({ text: '' });
+          sendResponse({ ok: true, serverDeleted, serverError });
+          break;
+        }
         case 'SYNC_BUFFER_PEEK': {
           // Return a summary of each buffered event so the user can see what
           // would be dropped before clicking Clear unsent. Just the fields

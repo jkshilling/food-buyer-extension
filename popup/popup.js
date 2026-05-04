@@ -431,7 +431,8 @@ const syncEls = {
   rejectedSep: document.querySelector('#sync-rejected-sep'),
   rejectedBtn: document.querySelector('#sync-rejected-btn'),
   bufferList: document.querySelector('#sync-buffer-list'),
-  rejectedList: document.querySelector('#sync-rejected-list')
+  rejectedList: document.querySelector('#sync-rejected-list'),
+  resetBtn: document.querySelector('#sync-reset-btn')
 };
 
 // Render N seconds as a human-friendly age. "12s ago", "34m ago", "7h ago",
@@ -607,6 +608,39 @@ syncEls.clearBtn.addEventListener('click', async () => {
   syncEls.clearBtn.disabled = false;
   syncEls.bufferList.classList.add('hidden');
   refreshSyncStatus();
+});
+
+syncEls.resetBtn.addEventListener('click', async () => {
+  if (!confirm(
+    'Wipe ALL your grocery data?\n\n' +
+    'This deletes:\n' +
+    '  • Your run results and buffered events (local)\n' +
+    '  • Your searches, catalog, price history, favorites (server)\n\n' +
+    'Keeps:\n' +
+    '  • Your saved API token and base URL\n' +
+    '  • Your shopping list (re-extracts from meal planner)\n\n' +
+    'This cannot be undone.'
+  )) return;
+  syncEls.resetBtn.disabled = true;
+  setSyncPill('Resetting…');
+  const r = await send({ type: 'RESET_ALL' });
+  syncEls.resetBtn.disabled = false;
+  if (r.ok) {
+    if (r.serverError) {
+      setSyncPill('Local cleared. Server: ' + r.serverError, 'warn');
+    } else {
+      const d = r.serverDeleted || {};
+      setSyncPill(`Reset complete · ${d.searches || 0} searches, ${d.mappings || 0} mappings, ${d.favorites || 0} favorites deleted.`, 'ok');
+    }
+  } else {
+    setSyncPill('Reset failed: ' + (r.error || 'unknown'), 'fail');
+  }
+  // Force a re-render of the Run tab too — runState was cleared.
+  state.run = null;
+  state.estimate = null;
+  renderRun();
+  renderEstimate();
+  renderList();
 });
 
 syncEls.rejectedBtn.addEventListener('click', async () => {
